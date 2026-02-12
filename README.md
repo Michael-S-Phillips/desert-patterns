@@ -13,7 +13,7 @@ Requires Python >= 3.10.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Deep learning features (DINOv2 embeddings, SAM ground masking)
+# Deep learning features (DINOv3 embeddings, SAM ground masking)
 pip install -e ".[ml]"
 
 # Interactive Gradio explorer
@@ -46,7 +46,7 @@ python scripts/preprocess_data.py --config configs/data_config.yaml
 
 ### 3. Feature Extraction
 
-Extracts dual feature representations for every preprocessed image: DINOv2 embeddings (768-d) and classical texture descriptors (90-d). Fuses via PCA + weighted concatenation.
+Extracts dual feature representations for every preprocessed image: DINOv3 embeddings (768-d) and classical texture descriptors (90-d). Fuses via PCA + weighted concatenation.
 
 ```bash
 python scripts/extract_features.py --config configs/feature_config.yaml
@@ -56,7 +56,7 @@ python scripts/extract_features.py --config configs/feature_config.yaml
 
 ### 4. Clustering
 
-Runs UMAP dimensionality reduction followed by HDBSCAN clustering across multiple feature ablations (DINOv2-only, texture-only, fused 70/30, fused 50/50). Computes quality metrics, bootstrap stability, cluster characterization, temporal analysis, and continuous pattern space.
+Runs UMAP dimensionality reduction followed by HDBSCAN clustering across multiple feature ablations (DINOv3-only, texture-only, fused 70/30, fused 50/50). Computes quality metrics, bootstrap stability, cluster characterization, temporal analysis, and continuous pattern space.
 
 ```bash
 python scripts/run_clustering.py --config configs/clustering_config.yaml
@@ -118,7 +118,7 @@ All parameters are specified in YAML files under `configs/`. Each config file co
 | Config file | Stage | Key parameters |
 |---|---|---|
 | `data_config.yaml` | Ingestion + preprocessing | Altitude group boundaries, tile size (512 px), overlap (25%), blur threshold, SAM checkpoint path |
-| `feature_config.yaml` | Feature extraction | DINOv2 model name, GLCM distances, Gabor filter bank, LBP radius, PCA variance threshold (0.95), fusion weights (0.7/0.3) |
+| `feature_config.yaml` | Feature extraction | DINOv3 model name, GLCM distances, Gabor filter bank, LBP radius, PCA variance threshold (0.95), fusion weights (0.7/0.3) |
 | `clustering_config.yaml` | Clustering | UMAP (n_neighbors=30, min_dist=0.1, cosine metric), HDBSCAN (min_cluster_size=15, min_samples=5, EOM selection), bootstrap iterations (100), ablation list, curation parameters |
 | `visualization_config.yaml` | Visualization | DPI (300), font (Arial), export formats (PNG+SVG), figure width (7"), gallery grid size, Gradio server port |
 
@@ -136,13 +136,13 @@ The pipeline processes heterogeneous desert imagery (aerial drone at multiple al
 
 **Ground-level masking.** Ground-level photographs contain non-surface content (sky, horizon, equipment). A three-tier fallback chain isolates the ground surface: (1) the Segment Anything Model (SAM; Kirillov et al. 2023), ViT-B checkpoint, prompted with a point grid in the lower image region; (2) horizon detection via Canny edge detection and Hough line transform on the upper half; (3) lower 60% crop. The first method that succeeds is used.
 
-**Standardization.** All tiles and masked ground patches are resized to 518x518 px (bicubic interpolation: INTER_AREA for downsampling, INTER_LANCZOS4 for upsampling) to match the DINOv2 input resolution. Per-image channel-wise normalization maps each channel to zero mean and unit variance, clipping at +/-3 standard deviations and rescaling to [0, 255]. Uniform-intensity images are mapped to a constant value of 128.
+**Standardization.** All tiles and masked ground patches are resized to 518x518 px (bicubic interpolation: INTER_AREA for downsampling, INTER_LANCZOS4 for upsampling) to match the DINOv3 input resolution. Per-image channel-wise normalization maps each channel to zero mean and unit variance, clipping at +/-3 standard deviations and rescaling to [0, 255]. Uniform-intensity images are mapped to a constant value of 128.
 
 ### Feature Extraction
 
 Two complementary feature representations are extracted from every preprocessed image. The self-supervised embedding captures high-level semantic structure invariant to viewpoint, scale, and lighting; the classical texture descriptors provide physically interpretable features for scientific explanation.
 
-**DINOv2 embeddings.** We use DINOv2 ViT-B/14 (Oquab et al. 2024), a Vision Transformer pretrained with self-supervision on 142 M images (LVD-142M dataset), loaded via HuggingFace Transformers. We extract the [CLS] token embedding, yielding a 768-dimensional feature vector per image. The [CLS] token aggregates global image information across all spatial positions via the self-attention mechanism and serves as a holistic image descriptor. Patch tokens (excluding the CLS and 4 register tokens) are optionally available for spatial analysis. Inference runs on MPS (Apple Silicon) or CPU; no GPU training is performed.
+**DINOv3 embeddings.** We use DINOv3 ViT-B/16 (`facebook/dinov3-vitb16-pretrain-lvd1689m`), a Vision Transformer pretrained with self-supervision on the LVD-1689M dataset, loaded via HuggingFace Transformers. We extract the [CLS] token embedding, yielding a 768-dimensional feature vector per image. The [CLS] token aggregates global image information across all spatial positions via the self-attention mechanism and serves as a holistic image descriptor. Patch tokens (excluding the CLS and 4 register tokens) are optionally available for spatial analysis. Inference runs on MPS (Apple Silicon) or CPU; no GPU training is performed.
 
 **Classical texture descriptors (90 features).** Each image is converted to 8-bit grayscale and processed through six feature families:
 
@@ -160,25 +160,25 @@ Two complementary feature representations are extracted from every preprocessed 
 
 ### Feature Fusion
 
-The 768-d DINOv2 embeddings and the 90-d texture descriptors are fused into a single feature vector per image via the following procedure:
+The 768-d DINOv3 embeddings and the 90-d texture descriptors are fused into a single feature vector per image via the following procedure:
 
 1. **L2 normalization** of each feature set independently (row-wise).
-2. **PCA** on each normalized set, retaining components explaining >= 95% of cumulative variance (fitted with seed = 42, full SVD solver). This reduces the DINOv2 features to typically 100-200 dimensions and the texture features to approximately 30-50 dimensions.
-3. **Weighted concatenation:** fused = [w_dino * dino_pca | w_texture * texture_pca], with default weights w_dino = 0.7, w_texture = 0.3. The heavier DINOv2 weight reflects its stronger clustering performance; the texture weight adds interpretability.
+2. **PCA** on each normalized set, retaining components explaining >= 95% of cumulative variance (fitted with seed = 42, full SVD solver). This reduces the DINOv3 features to typically 100-200 dimensions and the texture features to approximately 30-50 dimensions.
+3. **Weighted concatenation:** fused = [w_dino * dino_pca | w_texture * texture_pca], with default weights w_dino = 0.7, w_texture = 0.3. The heavier DINOv3 weight reflects its stronger clustering performance; the texture weight adds interpretability.
 4. **Final L2 normalization** of the concatenated vector.
 
-The pipeline also supports single-modality analysis (DINOv2-only or texture-only) for ablation comparison.
+The pipeline also supports single-modality analysis (DINOv3-only or texture-only) for ablation comparison.
 
 ### Feature Curation (Optional)
 
-When initial (triage) clustering reveals clusters dominated by scene content rather than ground surface patterns (e.g., tape measures, sky), an optional orthogonal-projection curation step can remove scene-content directions from the DINOv2 embedding space before the final clustering.
+When initial (triage) clustering reveals clusters dominated by scene content rather than ground surface patterns (e.g., tape measures, sky), an optional orthogonal-projection curation step can remove scene-content directions from the DINOv3 embedding space before the final clustering.
 
 1. Compute the centroid of scene-contaminated clusters and the centroid of pattern clusters from the triage stage.
 2. Form difference vectors d_i = centroid(scene_i) - centroid(pattern) for each scene cluster.
 3. Apply PCA to the difference matrix to extract the top K orthonormal scene directions V (default K = 3, clamped to the number of scene clusters; directions with eigenvalues below 1e-10 are discarded).
 4. Project out: X_curated = X - (X V^T) V.
 
-This zeroes the component of each feature vector along the identified scene directions while preserving orthogonal (pattern-relevant) components. The curated DINOv2 features replace the raw embeddings for the DINOv2-only and fused ablations; texture features are unaffected. Curation directions are persisted alongside the UMAP/HDBSCAN models so that new images at inference time receive the same projection.
+This zeroes the component of each feature vector along the identified scene directions while preserving orthogonal (pattern-relevant) components. The curated DINOv3 features replace the raw embeddings for the DINOv3-only and fused ablations; texture features are unaffected. Curation directions are persisted alongside the UMAP/HDBSCAN models so that new images at inference time receive the same projection.
 
 ### Dimensionality Reduction
 
@@ -202,7 +202,7 @@ HDBSCAN (Campello et al. 2013; McInnes et al. 2017) operates on the 15-dimension
 
 Parameters: min_cluster_size = 15, min_samples = 5, cluster_selection_method = "eom" (Excess of Mass; Campello et al. 2013). The EOM method extracts the most persistent clusters from the condensed tree, favouring cluster selections that maximize total excess of mass over the stability threshold -- this is preferable to the "leaf" method for datasets with clusters of varying density.
 
-**Multi-ablation comparison.** Clustering is run on four feature configurations: DINOv2-only, texture-only, fused (0.7/0.3 default weighting), and fused (0.5/0.5 equal weighting). Cluster quality is compared across all four to select the best configuration.
+**Multi-ablation comparison.** Clustering is run on four feature configurations: DINOv3-only, texture-only, fused (0.7/0.3 default weighting), and fused (0.5/0.5 equal weighting). Cluster quality is compared across all four to select the best configuration.
 
 ### Cluster Validation
 
@@ -254,7 +254,7 @@ Fitted UMAP and HDBSCAN models are serialized via joblib. New images are process
 2. Cluster assignment and membership probability are obtained via `hdbscan.approximate_predict()`.
 3. Features are projected into 2D and 3D UMAP space for visualization.
 
-If feature curation was applied during training, the saved orthogonal projection directions are automatically applied to new DINOv2 features before UMAP projection.
+If feature curation was applied during training, the saved orthogonal projection directions are automatically applied to new DINOv3 features before UMAP projection.
 
 ### Reproducibility
 
@@ -281,7 +281,7 @@ All figures follow publication standards: 300 DPI raster (PNG) with vector (SVG)
 - McInnes, L., Healy, J., & Astels, S. (2017). hdbscan: Hierarchical density based clustering. *JOSS*, 2(11), 205.
 - Moulavi, D. et al. (2014). Density-based clustering validation. *SDM 2014*, 839-847.
 - Ojala, T., Pietikainen, M., & Maenpaa, T. (2002). Multiresolution gray-scale and rotation invariant texture classification with local binary patterns. *IEEE TPAMI*, 24(7), 971-987.
-- Oquab, M. et al. (2024). DINOv2: Learning robust visual features without supervision. *TMLR*.
+- Oquab, M. et al. (2024). DINOv2: Learning robust visual features without supervision. *TMLR*. (DINOv3 builds on this architecture.)
 - Plotnick, R. E., Gardner, R. H., & O'Neill, R. V. (1996). Lacunarity indices as measures of landscape texture. *Landscape Ecology*, 8(3), 201-211.
 - Rousseeuw, P. J. (1987). Silhouettes: A graphical aid to the interpretation and validation of cluster analysis. *J. Comput. Appl. Math.*, 20, 53-65.
 - van der Maaten, L. & Hinton, G. (2008). Visualizing data using t-SNE. *JMLR*, 9, 2579-2605.
