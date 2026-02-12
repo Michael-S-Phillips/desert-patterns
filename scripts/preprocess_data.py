@@ -2,7 +2,7 @@
 """Preprocessing script — Phase 2 of the desert patterns pipeline.
 
 Tiles drone images, masks ground images, and standardizes all patches
-to 518x518 for DINOv2 feature extraction.
+to 518x518 for DINOv3 feature extraction.
 
 Usage:
     python scripts/preprocess_data.py --config configs/data_config.yaml

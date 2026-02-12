@@ -33,7 +33,7 @@ EVERY figure must meet these requirements:
 3. **Cluster characterization** — texture feature heatmap + radar plots + feature importance
 4. **Temporal dynamics** — stacked bars + density contours per phase + transition Sankey
 5. **Geospatial mapping** — basin map with cluster assignments + microbial overlay
-6. **Feature ablation** — comparison of DINOv2-only vs texture-only vs fused clustering
+6. **Feature ablation** — comparison of DINOv3-only vs texture-only vs fused clustering
 
 ## Gradio Explorer Application
 

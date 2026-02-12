@@ -116,9 +116,9 @@ ground_masking:
   min_ground_fraction: 0.15     # SAM sanity check: reject if ground < 15%
   max_ground_fraction: 0.95     # SAM sanity check: reject if ground > 95%
 
-# Standardization for DINOv2 input
+# Standardization for DINOv3 input
 standardization:
-  standard_size: 518            # DINOv2 ViT-B/14 optimal input size
+  standard_size: 518            # DINOv3 ViT-B/16 optimal input size
   normalize_channels: true      # per-image channel-wise normalization
   white_balance: false          # gray-world white balance (off by default)
 

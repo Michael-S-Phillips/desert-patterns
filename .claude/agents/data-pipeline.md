@@ -17,7 +17,7 @@ or annotation steps.
 - Build the ground-level image masking module: isolate ground surface from sky/horizon
   using SAM (Segment Anything Model) as primary method, with horizon detection and
   lower-crop as fallbacks
-- Standardize all processed images to uniform size (518×518 for DINOv2 compatibility)
+- Standardize all processed images to uniform size (518×518 for DINOv3 compatibility)
   with channel-wise normalization
 - Generate the master image catalog CSV linking all processed images to their metadata
   and raw source paths

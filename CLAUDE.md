@@ -9,7 +9,7 @@ types in Atacama Desert (Yungay basin) imagery. Supports microbial ecology resea
 revealing natural pattern groupings without human-imposed categories.
 
 This is NOT a supervised classification project. No training loop. No labels. Feature
-extraction uses pretrained DINOv2 (inference only).
+extraction uses pretrained DINOv3 (inference only).
 
 ## Pipeline Architecture
 
@@ -19,10 +19,10 @@ The pipeline has five sequential stages:
    compute GSD, assign temporal phases (pre/during/post rain), quality-flag images
 2. **Preprocess** — tile drone images into overlapping 512px patches, mask ground in
    ground-level photos (SAM with horizon-detection and lower-crop fallbacks),
-   standardize all to 518x518 for DINOv2
-3. **Extract features** — DINOv2 ViT-B/14 [CLS] embeddings (768-d) + classical texture
+   standardize all to 518x518 for DINOv3
+3. **Extract features** — DINOv3 ViT-B/16 [CLS] embeddings (768-d) + classical texture
    descriptors (~90 features: GLCM, Gabor, fractal dimension, lacunarity, LBP, global stats).
-   Fuse via L2-normalize -> PCA (95% variance) -> weighted concat (default 70/30 DINOv2/texture)
+   Fuse via L2-normalize -> PCA (95% variance) -> weighted concat (default 70/30 DINOv3/texture)
 4. **Cluster** — UMAP dimensionality reduction (cosine metric) -> HDBSCAN (EOM selection).
    Characterize clusters with texture profiles, feature importance (Kruskal-Wallis), temporal
    analysis (phase distributions, transition matrices, chi-squared tests)
@@ -85,7 +85,7 @@ All config in YAML under `configs/`. Four config files correspond to the four pi
 
 Key parameters with defaults:
 - Tiling: 512px tiles, 25% overlap, reject tiles with >20% no-data
-- DINOv2: `dinov2_vitb14`, input 518x518, batch size 32
+- DINOv3: `facebook/dinov3-vitb16-pretrain-lvd1689m`, input 518x518, batch size 32
 - GLCM: distances [1,3,5,10], 4 angles averaged over orientation
 - Gabor: 4 frequencies x 6 orientations, mean + variance per filter
 - UMAP: n_neighbors=30, min_dist=0.1, cosine metric, seed=42
@@ -106,7 +106,7 @@ Key parameters with defaults:
 
 See `.claude/agents/` for specialized agent instructions:
 - `data-pipeline.md` — ingestion, tiling, masking, preprocessing
-- `feature-extraction.md` — DINOv2 embeddings, texture descriptors, fusion
+- `feature-extraction.md` — DINOv3 embeddings, texture descriptors, fusion
 - `clustering-analysis.md` — UMAP, HDBSCAN, characterization, temporal analysis
 - `visualization-export.md` — plots, maps, publication figures, Gradio app
 

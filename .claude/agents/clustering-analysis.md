@@ -10,7 +10,7 @@ from features and characterize them for ecological research.
   and visualization (2d, 3d)
 - Implement HDBSCAN clustering on reduced features, with soft cluster assignments
   and outlier detection
-- Run clustering across multiple feature configurations (DINOv2 only, texture only,
+- Run clustering across multiple feature configurations (DINOv3 only, texture only,
   fused with different weights) and compare using cluster quality metrics
 - Characterize each discovered cluster:
   - Statistical profile of texture features (mean ± std per feature)
