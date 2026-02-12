@@ -1,0 +1,26 @@
+feature_store: "outputs/features/feature_store.h5"
+cluster_dir: "outputs/clusters"
+manifest_path: "data/processed/preprocessing_manifest.csv"
+catalog_path: "data/metadata/image_catalog.csv"
+ablation_name: "fused_default"
+output_dir: "outputs/figures"
+
+style:
+  dpi: 300
+  font_family: "Arial"
+  font_size_base: 10
+  figure_width_double: 7.0
+  export_formats: ["png", "svg"]
+  continuous_cmap: "viridis"
+
+cluster_gallery:
+  n_per_cluster: 25
+  grid_cols: 5
+  thumbnail_size: 128
+
+temporal:
+  phase_order: ["pre_rain", "during_rain", "post_rain"]
+
+gradio:
+  server_port: 7860
+  share: false

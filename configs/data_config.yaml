@@ -1,0 +1,130 @@
+# Data ingestion configuration for desert patterned ground pipeline
+# Maps researcher-organized directories to structured metadata
+
+data_root: "data/kim_2023"
+catalog_output: "data/metadata/image_catalog.csv"
+
+# Explicit source-to-directory mapping
+# Each entry maps a subdirectory to its source type, site, and session
+sources:
+  - directory: "Kim_BigPool_Drone/Big Pool 1 1130 am"
+    source_type: "drone"
+    site_name: "big_pool"
+    session_name: "big_pool_1_1130am"
+
+  - directory: "Kim_BigPool_Drone/Big Pool 2 220pm"
+    source_type: "drone"
+    site_name: "big_pool"
+    session_name: "big_pool_2_220pm"
+
+  - directory: "Kim_Biofilm_Pool_Drone"
+    source_type: "drone"
+    site_name: "biofilm_pool"
+    session_name: "biofilm_pool_drone"
+
+  - directory: "Kim_BigPool_Ground/Kim_Playa_11am"
+    source_type: "ground"
+    site_name: "big_pool"
+    session_name: "playa_11am"
+
+  - directory: "Kim_BigPool_Ground/Kim_Playa_4pm"
+    source_type: "ground"
+    site_name: "big_pool"
+    session_name: "playa_4pm"
+
+  - directory: "Kim_Mudcrack_Ground_Only(no_Drone)"
+    source_type: "ground"
+    site_name: "mudcrack"
+    session_name: "mudcrack_ground"
+
+  - directory: "arads sept 17-19 2019"
+    source_type: "ground"
+    site_name: "arads"
+    session_name: "arads_sept_2019"
+
+  - directory: "big pool sept 2019"
+    source_type: "ground"
+    site_name: "big_pool"
+    session_name: "big_pool_sept_2019"
+
+  - directory: "feb 26 2018 arads"
+    source_type: "ground"
+    site_name: "arads"
+    session_name: "arads_feb_2018"
+
+  - directory: "july 1 2017"
+    source_type: "ground"
+    site_name: "arads"
+    session_name: "arads_july_2017"
+
+# File selection
+include_extensions:
+  - ".jpg"
+  - ".JPG"
+
+# Rain event temporal boundaries (August 2023, Yungay basin)
+rain_event:
+  start: "2023-08-24"
+  end: "2023-08-28"
+
+# Altitude classification boundaries (meters)
+altitude_groups:
+  high:
+    min: 100
+    max: 999
+  mid:
+    min: 20
+    max: 100
+  low:
+    min: 1
+    max: 20
+  ground:
+    min: 0
+    max: 1
+
+# Image quality thresholds
+quality:
+  blur_threshold: 100.0       # Laplacian variance below this = blurry
+  exposure_clip_threshold: 0.05  # fraction of clipped pixels to flag
+  min_resolution: 256          # minimum dimension in pixels
+
+# DJI drone sensor specifications (FC2204 — 1/2.3" CMOS)
+# Actual image dimensions from EXIF: 4000x3000, focal_length=4.58mm
+sensor:
+  sensor_width_mm: 6.17
+  sensor_height_mm: 4.55
+  default_focal_length_mm: 4.58
+
+# ============================================================
+# Phase 2: Preprocessing
+# ============================================================
+
+# Drone image tiling
+tiling:
+  tile_size: 512
+  overlap_fraction: 0.25
+  min_valid_fraction: 0.8
+  output_format: "png"
+
+# Ground image masking (SAM → horizon → lower crop)
+ground_masking:
+  sam_checkpoint: "/Volumes/Rohan/Software/sam/sam_vit_b_01ec64.pth"
+  device: "auto"                # "auto" tries MPS then CPU; never CUDA
+  point_grid_rows: 3
+  point_grid_cols: 5
+  crop_fraction: 0.6            # lower-crop fallback keeps bottom 60%
+  min_ground_fraction: 0.15     # SAM sanity check: reject if ground < 15%
+  max_ground_fraction: 0.95     # SAM sanity check: reject if ground > 95%
+
+# Standardization for DINOv2 input
+standardization:
+  standard_size: 518            # DINOv2 ViT-B/14 optimal input size
+  normalize_channels: true      # per-image channel-wise normalization
+  white_balance: false          # gray-world white balance (off by default)
+
+# Preprocessing output directories (relative to project root)
+preprocessing_output:
+  tiles_dir: "data/processed/tiles"
+  ground_masked_dir: "data/processed/ground_masked"
+  standardized_dir: "data/processed/standardized"
+  manifest_output: "data/processed/preprocessing_manifest.csv"
