@@ -1,0 +1,30 @@
+classifier:
+  model_type: logistic_regression
+  cv_folds: 5
+  random_state: 42
+  max_iter: 1000
+  class_weight: balanced
+
+dino:
+  model_name: facebook/dinov3-vitb16-pretrain-lvd1689m
+  input_size: 518
+  batch_size: 32
+  device: auto
+
+data:
+  image_dir: data/kim_2023/checked-images
+  label_map:
+    "1609 Mudcrack no mat": mudcrack
+    "Big Pool no mat 1": big_pool
+    "Big Pool no mat 2": big_pool
+    "Big Pool no mat 3": big_pool
+    "Big Pool no mat 4": big_pool
+    "JBIO mat": jbio
+    "JBIO pond": jbio
+    "JBIO wet mat ": jbio  # trailing space matches filesystem folder name; code strips before lookup
+
+output:
+  model_dir: outputs/models/classifier
+  figures_dir: outputs/figures
+  embedding_cache: outputs/features/classifier_embeddings.npy
+  label_cache: outputs/features/classifier_labels.npy
