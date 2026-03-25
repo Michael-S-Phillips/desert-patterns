@@ -35,3 +35,6 @@ Thumbs.db
 
 # SAM checkpoints
 *.pth
+
+# Git worktrees
+.worktrees/
