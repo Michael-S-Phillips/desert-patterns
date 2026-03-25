@@ -557,6 +557,8 @@ def fig_patch_projection_overlays(
     out_dir: Path,
     style: FigureStyle,
     n_per_class: int = 5,
+    offset: int = 0,
+    suffix: str = "",
 ) -> None:
     """Overlay per-patch LR coefficient activation as a heatmap on original images.
 
@@ -602,7 +604,7 @@ def fig_patch_projection_overlays(
         cls_mask = np.array([lbl == cls for lbl in y])
         cls_indices = np.where(cls_mask)[0]
         cls_probs = proba[cls_indices, cls_col]
-        top_local = np.argsort(cls_probs)[::-1][:n_per_class]
+        top_local = np.argsort(cls_probs)[::-1][offset:offset + n_per_class]
         top_global = cls_indices[top_local]
 
         for col_idx, gi in enumerate(top_global):
@@ -664,7 +666,7 @@ def fig_patch_projection_overlays(
     )
     fig.tight_layout()
 
-    out = out_dir / "patch_projection_overlays"
+    out = out_dir / f"patch_projection_overlays{suffix}"
     save_figure(fig, out, formats=style.export_formats, dpi=style.dpi)
     logger.info("Saved %s", out)
 
@@ -738,7 +740,11 @@ def main() -> None:
 
     if not args.skip_patch_overlays:
         logger.info("Fig 10: patch projection overlays (runs DINOv3 inference — use --skip-patch-overlays to skip)")
-        fig_patch_projection_overlays(X, y, image_list, model, config, out_dir, style)
+        fig_patch_projection_overlays(X, y, image_list, model, config, out_dir, style, suffix="")
+        logger.info("Fig 10b: patch projection overlays (ranks 6–10)")
+        fig_patch_projection_overlays(X, y, image_list, model, config, out_dir, style, offset=5, suffix="1")
+        logger.info("Fig 10c: patch projection overlays (ranks 11–15)")
+        fig_patch_projection_overlays(X, y, image_list, model, config, out_dir, style, offset=10, suffix="2")
     else:
         logger.info("Skipping patch projection overlays")
 
