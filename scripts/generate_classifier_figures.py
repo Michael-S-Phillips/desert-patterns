@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """Generate classifier analysis figures for DINOv3 embedding interpretability.
 
-Produces 9 figures in outputs/figures/classifier_analysis/:
-  class_gallery_{name}.png/.svg      — top-12 highest-confidence images per class
-  lr_coefficient_heatmap.png/.svg    — top-50 embedding dims x 3 classes
-  lr_coefficient_bars.png/.svg       — top-30 coeff dims per class (bar chart)
-  image_extremes.png/.svg            — images at high/low activation on top discriminative dims
+Produces figures in outputs/figures/classifier_analysis/:
+  class_gallery_{name}.png/.svg          — top-12 highest-confidence images per class
+  lr_coefficient_heatmap.png/.svg        — top-50 embedding dims x 3 classes
+  lr_coefficient_bars.png/.svg           — top-30 coeff dims per class (bar chart)
+  image_extremes.png/.svg                — images at high/low activation on top discriminative dims
   class_probability_histograms.png/.svg
   cosine_similarity_matrix.png/.svg
-  pca_projection.png/.svg            — first 2 PCs colored by class
-  pca_component_strips.png/.svg      — images at extremes of top 4 PCs
-  pca_variance_explained.png/.svg    — scree plot
+  pca_projection.png/.svg                — first 2 PCs colored by class
+  pca_component_strips.png/.svg          — images at extremes of top 4 PCs
+  pca_variance_explained.png/.svg        — scree plot
+  patch_projection_overlays.png/.svg     — per-patch activation heatmaps on original images
 
 Usage:
     python scripts/generate_classifier_figures.py
+    python scripts/generate_classifier_figures.py --skip-patch-overlays  # skip slow inference step
     python scripts/generate_classifier_figures.py --verbose
 """
 from __future__ import annotations
@@ -542,6 +544,132 @@ def fig_pca_variance_explained(
 
 
 # ---------------------------------------------------------------------------
+# Figure 10: patch projection overlays
+# ---------------------------------------------------------------------------
+
+
+def fig_patch_projection_overlays(
+    X: np.ndarray,
+    y: list[str],
+    image_list: list,
+    model,
+    config,
+    out_dir: Path,
+    style: FigureStyle,
+    n_per_class: int = 5,
+) -> None:
+    """Overlay per-patch LR coefficient activation as a heatmap on original images.
+
+    For each class, selects the top-n_per_class highest-confidence images, extracts
+    DINOv3 patch tokens, projects each patch onto the class's LR coefficient vector,
+    and overlays the resulting spatial activation map on the original image.
+
+    Requires torch + transformers (pip install -e ".[ml]").
+    """
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        logger.warning("torch not available — skipping patch projection overlays")
+        return
+
+    from src.features.dino_embeddings import DinoConfig, DinoFeatureExtractor
+
+    classes = list(model.classes_)
+    proba = model.predict_proba(X)
+
+    dino_cfg = DinoConfig(
+        model_name=config.dino_model_name,
+        input_size=config.dino_input_size,
+        batch_size=1,
+        device=config.dino_device,
+    )
+    extractor = DinoFeatureExtractor(dino_cfg)
+
+    ncols = n_per_class
+    nrows = len(classes)
+    fig, axes = plt.subplots(
+        nrows, ncols,
+        figsize=(ncols * 2.4, nrows * 2.6),
+    )
+    if nrows == 1:
+        axes = axes[np.newaxis, :]
+
+    cmap = plt.get_cmap("hot")
+
+    for row_idx, cls in enumerate(classes):
+        cls_col = classes.index(cls)
+        cls_coef = model.coef_[cls_col]           # (768,) — discriminative direction
+        cls_mask = np.array([lbl == cls for lbl in y])
+        cls_indices = np.where(cls_mask)[0]
+        cls_probs = proba[cls_indices, cls_col]
+        top_local = np.argsort(cls_probs)[::-1][:n_per_class]
+        top_global = cls_indices[top_local]
+
+        for col_idx, gi in enumerate(top_global):
+            img_path, _ = image_list[gi]
+            ax = axes[row_idx, col_idx]
+            ax.axis("off")
+
+            try:
+                # Load original image for display (resize to input_size for alignment)
+                pil_img = Image.open(img_path).convert("RGB")
+                display_img = np.asarray(
+                    pil_img.resize(
+                        (config.dino_input_size, config.dino_input_size),
+                        Image.LANCZOS,
+                    )
+                )
+
+                # Extract patch tokens
+                patch_tokens = extractor.extract_patch_tokens(pil_img)  # (n_patches, 768)
+                n_patches = patch_tokens.shape[0]
+                grid_size = int(round(np.sqrt(n_patches)))
+
+                # Project each patch onto the class coefficient vector
+                activations = patch_tokens @ cls_coef               # (n_patches,)
+                spatial = activations[:grid_size * grid_size].reshape(grid_size, grid_size)
+
+                # Normalize per-image to [0, 1] for full colormap range
+                vmin, vmax = spatial.min(), spatial.max()
+                if vmax > vmin:
+                    spatial_norm = (spatial - vmin) / (vmax - vmin)
+                else:
+                    spatial_norm = np.zeros_like(spatial)
+
+                # Upsample to display size using PIL
+                heat_pil = Image.fromarray((spatial_norm * 255).astype(np.uint8), mode="L")
+                heat_up = np.asarray(
+                    heat_pil.resize(
+                        (config.dino_input_size, config.dino_input_size),
+                        Image.BILINEAR,
+                    ),
+                    dtype=np.float32,
+                ) / 255.0
+
+                ax.imshow(display_img)
+                ax.imshow(cmap(heat_up), alpha=0.5)
+                ax.set_title(f"{cls_probs[top_local[col_idx]]:.3f}", fontsize=7)
+
+            except Exception as e:
+                logger.warning("Failed patch overlay for %s: %s", img_path, e)
+
+        axes[row_idx, 0].set_ylabel(
+            cls, fontsize=style.font_size_base, rotation=90, labelpad=4,
+        )
+
+    fig.suptitle(
+        "Patch-level LR coefficient activation overlaid on images\n"
+        "(brighter = patch token aligns more with the class discriminative direction)",
+        fontsize=style.font_size_base,
+    )
+    fig.tight_layout()
+
+    out = out_dir / "patch_projection_overlays"
+    save_figure(fig, out, formats=style.export_formats, dpi=style.dpi)
+    logger.info("Saved %s", out)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -549,6 +677,11 @@ def fig_pca_variance_explained(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate classifier analysis figures")
     parser.add_argument("--config", default="configs/classifier_config.yaml")
+    parser.add_argument(
+        "--skip-patch-overlays",
+        action="store_true",
+        help="Skip patch projection overlays (requires DINOv3 inference)",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -602,6 +735,12 @@ def main() -> None:
 
     logger.info("Fig 9: PCA variance explained")
     fig_pca_variance_explained(pca, out_dir, style)
+
+    if not args.skip_patch_overlays:
+        logger.info("Fig 10: patch projection overlays (runs DINOv3 inference — use --skip-patch-overlays to skip)")
+        fig_patch_projection_overlays(X, y, image_list, model, config, out_dir, style)
+    else:
+        logger.info("Skipping patch projection overlays")
 
     logger.info("All figures saved to %s", out_dir)
 
