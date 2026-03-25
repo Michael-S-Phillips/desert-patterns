@@ -1,7 +1,7 @@
 # Classifier Analysis Figures Design
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Nine publication-quality figures visualizing class structure and DINOv3 embedding interpretability for the supervised pattern classifier. Personal analysis use.
 
 ---
@@ -38,8 +38,8 @@ CLI flags: `--config` (default `configs/classifier_config.yaml`), `--verbose`
 ### 1. Per-class image galleries — `class_gallery_{name}.png/.svg` (3 files)
 
 For each class (mudcrack, big_pool, jbio):
-- Load predicted probabilities for all images in that class
-- Select top-12 highest-confidence images (or all if fewer than 12)
+- Compute `proba = model.predict_proba(X)` — columns ordered by `model.classes_`; select the column for class `c` as `proba[:, list(model.classes_).index(c)]`
+- Select top-12 highest-confidence images among those belonging to class `c` (or all if fewer than 12)
 - Thumbnail grid: 3 rows × 4 cols, thumbnails resized to 224×224 (INTER_AREA)
 - Title: `"{class_name} — top-12 by confidence"`, subtitle shows class count
 - No axes; tight layout
@@ -49,7 +49,7 @@ For each class (mudcrack, big_pool, jbio):
 - Input: `model.coef_` shape (3, 768)
 - Select top-50 embedding dimensions by max absolute coefficient across all classes
 - Plot: heatmap, rows = classes, cols = top-50 dims (sorted by descending max |coef|)
-- Colormap: `cividis` (diverging perceptually uniform), centered at 0
+- Colormap: `RdBu_r` (diverging, colourblind-safe), symmetric around 0 (`vmin=-max_abs_coef`, `vmax=+max_abs_coef`)
 - X-axis: dim indices, Y-axis: class names
 - Colorbar labeled "LR coefficient"
 
@@ -64,7 +64,7 @@ For each class (mudcrack, big_pool, jbio):
 
 Answers "what visual pattern does embedding dim N correspond to?"
 
-- Identify top-3 most discriminative embedding dimensions: for each class, take the single highest-|coef| dimension; deduplicate → up to 3 unique dims
+- Identify top-3 most discriminative embedding dimensions: for each class in turn, take highest-|coef| dims (top-1, then top-2, etc.) until 3 unique dims are accumulated across all classes; if all three classes share the same top-1 dim, expand to top-2 per class and so on. Layout adapts to the actual number of unique dims found (may be 1–3 rows).
 - For each dim: sort all 367 images by their raw activation value on that dim; take top-6 (highest) and bottom-6 (lowest)
 - Layout: one row per dim (3 rows), left half = low activation (6 thumbnails), right half = high activation (6 thumbnails)
 - Row label: "Dim {idx} — low ←→ high", annotated with which class it discriminates most
@@ -89,7 +89,7 @@ Answers "what visual pattern does embedding dim N correspond to?"
 
 ### 7. PCA projection — `pca_projection.png/.svg`
 
-- Fit PCA(n_components=2) on the 367×768 embeddings
+- Use the shared PCA(n_components=50) fit (see Implementation Notes); project onto first 2 components
 - Scatter plot colored by class (Wong palette), s=20, alpha=0.7
 - Overlay top-5 loading vectors as arrows from origin (scaled for visibility), labeled with dim index
 - Axes: "PC1 (X% var)", "PC2 (Y% var)"
@@ -97,7 +97,7 @@ Answers "what visual pattern does embedding dim N correspond to?"
 
 ### 8. PCA component image strips — `pca_component_strips.png/.svg`
 
-- Fit PCA(n_components=4) on embeddings
+- Use the shared PCA(n_components=50) fit; project onto first 4 components
 - For each of the 4 components: sort images by projection score; take top-5 (highest) and bottom-5 (lowest)
 - Layout: 4 rows (one per PC), 10 thumbnails per row (5 low | 5 high), with a center divider label
 - Row label: "PC{n} ({X}% var) — low ←→ high"
@@ -115,8 +115,10 @@ Answers "what visual pattern does embedding dim N correspond to?"
 
 ## Implementation Notes
 
-- Thumbnail loading: `PIL.Image.open(path).convert("RGB")`, resize with `INTER_AREA` via `cv2` or PIL `LANCZOS`
-- `scan_labeled_images()` returns `list[tuple[Path, str]]` — align with embedding array by sorting paths the same way the training script did (sorted rglob order)
+- **Label/path alignment**: Load `y` from `classifier_labels.npy` (authoritative). To get image paths, call `scan_labeled_images(image_dir, label_map)` — it returns paths in sorted rglob order, which matches the training script's cache order. Validate: `assert [lbl for _, lbl in image_list] == list(y)`, raising a descriptive error if they disagree (stale cache).
+- Thumbnail loading: `PIL.Image.open(path).convert("RGB")`, resize to target size with `PIL.Image.LANCZOS`
+- **Shared PCA**: Fit `PCA(n_components=50, random_state=42)` once at script start; slice components for Figs 7, 8, 9 to avoid redundant SVD decompositions.
+- **Probability column selection**: `proba = model.predict_proba(X)`, then `proba[:, list(model.classes_).index(cls)]` for class `cls`.
 - PCA from `sklearn.decomposition.PCA`, cosine similarity from `sklearn.metrics.pairwise.cosine_similarity`
 - Use `src.visualization.style.save_figure(fig, path, formats, dpi)` for all saves
 - Use `src.visualization.style.setup_matplotlib_style()` once at script start
