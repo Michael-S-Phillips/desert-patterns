@@ -187,6 +187,70 @@ class PatternSegmenter:
         )
 
     # ------------------------------------------------------------------
+    # Self-attention map (alternative to classifier-based attention)
+    # ------------------------------------------------------------------
+
+    def _select_attention_head(self, attn_maps: np.ndarray) -> int:
+        """Return the index of the head with the highest spatial entropy.
+
+        Higher entropy = attention is spread over more patches = more
+        spatially informative for segmentation prompts.
+
+        Args:
+            attn_maps: float32, shape (n_heads, n_patches), each row sums to 1.
+
+        Returns:
+            Index of the highest-entropy head.
+        """
+        eps = 1e-10
+        entropy = -(attn_maps * np.log(attn_maps + eps)).sum(axis=-1)  # (n_heads,)
+        return int(np.argmax(entropy))
+
+    def _compute_self_attention(
+        self,
+        pil_img: Image,
+        image_size: tuple[int, int],
+    ) -> tuple[np.ndarray, int]:
+        """Compute attention map from the max-entropy DINOv3 self-attention head.
+
+        Extracts per-head CLS→patch attention, selects the head with the
+        highest spatial entropy, then upsamples and smooths to native resolution
+        (same post-processing as ``_compute_attention``).
+
+        Args:
+            pil_img: PIL Image at native resolution.
+            image_size: (width, height) in PIL convention.
+
+        Returns:
+            (attention_map, n_patches) where attention_map is float32 (H, W)
+            in [0, 1] and n_patches is read from the attention tensor shape.
+        """
+        from scipy.ndimage import gaussian_filter
+
+        attn_maps = self._get_extractor().extract_attention_maps(pil_img)
+        n_patches = attn_maps.shape[1]
+
+        best_head = self._select_attention_head(attn_maps)
+        selected = attn_maps[best_head]  # (n_patches,)
+
+        grid_size = int(round(np.sqrt(n_patches)))
+        width, height = image_size
+
+        spatial = selected.reshape(grid_size, grid_size).astype(np.float32)
+        heat_pil = Image.fromarray((spatial * 255).astype(np.uint8), mode="L")
+        heat_up = (
+            np.asarray(heat_pil.resize((width, height), Image.BILINEAR), dtype=np.float32)
+            / 255.0
+        )
+
+        heat_smooth = gaussian_filter(heat_up, sigma=2).astype(np.float32)
+        smin, smax = heat_smooth.min(), heat_smooth.max()
+        attn_out = (
+            (heat_smooth - smin) / (smax - smin) if smax > smin else heat_smooth
+        )
+        return attn_out, n_patches
+
+    # ------------------------------------------------------------------
     # Thresholding
     # ------------------------------------------------------------------
 

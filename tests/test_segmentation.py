@@ -363,3 +363,82 @@ def test_run_sam_returns_lists():
 
     assert isinstance(masks, list)
     assert isinstance(scores, list)
+
+
+# ---------------------------------------------------------------------------
+# Head selection + _compute_self_attention tests
+# ---------------------------------------------------------------------------
+
+
+def test_select_attention_head_max_entropy():
+    """Head with uniform distribution (max entropy) is selected."""
+    segmenter = _make_segmenter()
+    n_heads, n_patches = 3, 16
+    attn_maps = np.zeros((n_heads, n_patches), dtype=np.float32)
+    attn_maps[0, 0] = 1.0                       # head 0: all mass on patch 0 (min entropy)
+    attn_maps[1, :] = 1.0 / n_patches           # head 1: uniform (max entropy)
+    attn_maps[2, :4] = 0.25                     # head 2: semi-uniform (mid entropy)
+    head = segmenter._select_attention_head(attn_maps)
+    assert head == 1
+
+
+def test_select_attention_head_valid_index():
+    """Always returns a valid head index for any input."""
+    segmenter = _make_segmenter()
+    rng = np.random.default_rng(42)
+    attn_maps = rng.random((12, 1369)).astype(np.float32)
+    attn_maps /= attn_maps.sum(axis=-1, keepdims=True)
+    head = segmenter._select_attention_head(attn_maps)
+    assert 0 <= head < 12
+
+
+def test_compute_self_attention_shape():
+    """Output attention map matches image (H, W)."""
+    segmenter = _make_segmenter()
+    n_patches = 16
+    mock_extractor = MagicMock()
+    mock_extractor.extract_attention_maps.return_value = (
+        np.full((2, n_patches), 1.0 / n_patches, dtype=np.float32)
+    )
+    segmenter._extractor = mock_extractor
+
+    from PIL import Image as PILImage
+    dummy = PILImage.fromarray(np.zeros((56, 56, 3), dtype=np.uint8))
+    attn_out, n_patches_out = segmenter._compute_self_attention(dummy, (56, 56))
+    assert attn_out.shape == (56, 56)
+    assert n_patches_out == n_patches
+
+
+def test_compute_self_attention_range():
+    """Output values are in [0, 1]."""
+    segmenter = _make_segmenter()
+    rng = np.random.default_rng(7)
+    n_patches = 25
+    attn = rng.random((3, n_patches)).astype(np.float32)
+    attn /= attn.sum(axis=-1, keepdims=True)
+    mock_extractor = MagicMock()
+    mock_extractor.extract_attention_maps.return_value = attn
+    segmenter._extractor = mock_extractor
+
+    from PIL import Image as PILImage
+    dummy = PILImage.fromarray(np.zeros((100, 120, 3), dtype=np.uint8))
+    attn_out, _ = segmenter._compute_self_attention(dummy, (120, 100))
+    assert attn_out.min() >= 0.0
+    assert attn_out.max() <= 1.0 + 1e-6
+    assert attn_out.dtype == np.float32
+
+
+def test_compute_self_attention_returns_n_patches():
+    """Returned n_patches equals the patch dimension of the attention maps."""
+    segmenter = _make_segmenter()
+    n_patches = 36
+    mock_extractor = MagicMock()
+    mock_extractor.extract_attention_maps.return_value = (
+        np.ones((4, n_patches), dtype=np.float32) / n_patches
+    )
+    segmenter._extractor = mock_extractor
+
+    from PIL import Image as PILImage
+    dummy = PILImage.fromarray(np.zeros((84, 84, 3), dtype=np.uint8))
+    _, returned_n = segmenter._compute_self_attention(dummy, (84, 84))
+    assert returned_n == n_patches
