@@ -227,3 +227,46 @@ def test_deduplicate_empty_input():
     kept_masks, kept_scores = segmenter._deduplicate_masks([], [])
     assert kept_masks == []
     assert kept_scores == []
+
+
+# ---------------------------------------------------------------------------
+# PatternSegmenter init + SAM (torch-optional)
+# ---------------------------------------------------------------------------
+
+
+def test_pattern_segmenter_lazy_init():
+    """PatternSegmenter constructs without loading torch, DINOv3, or SAM."""
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+    from src.features.dino_embeddings import DinoConfig
+
+    segmenter = PatternSegmenter(MagicMock(), SegmentationConfig(), DinoConfig())
+    assert segmenter._extractor is None
+    assert segmenter._sam_predictor is None
+
+
+def test_run_sam_returns_lists():
+    """_run_sam returns (list, list) even when all masks are below min area."""
+    pytest.importorskip("torch")
+
+    from unittest.mock import patch
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+    from src.features.dino_embeddings import DinoConfig
+
+    segmenter = PatternSegmenter(MagicMock(), SegmentationConfig(), DinoConfig())
+
+    # Mock SAM predictor to return tiny masks (below min_mask_area_fraction)
+    mock_predictor = MagicMock()
+    tiny_mask = np.zeros((100, 100), dtype=bool)
+    mock_predictor.predict.return_value = (
+        np.array([tiny_mask, tiny_mask, tiny_mask]),
+        np.array([0.9, 0.8, 0.7]),
+        None,
+    )
+    segmenter._sam_predictor = mock_predictor
+
+    attn = np.random.default_rng(0).random((100, 100)).astype(np.float32)
+    image_np = np.zeros((100, 100, 3), dtype=np.uint8)
+    masks, scores = segmenter._run_sam(image_np, attn, n_patches=196)
+
+    assert isinstance(masks, list)
+    assert isinstance(scores, list)
