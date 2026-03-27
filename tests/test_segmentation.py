@@ -99,6 +99,41 @@ def test_segmenter_no_classifier_raises_on_segment():
 
 
 # ---------------------------------------------------------------------------
+# extract_attention_maps tests
+# ---------------------------------------------------------------------------
+
+
+def test_extract_attention_maps_shape():
+    """Output shape is (n_heads, n_patches) with n_heads=12 for ViT-B."""
+    pytest.importorskip("torch")
+    from PIL import Image as PILImage
+    from src.features.dino_embeddings import DinoConfig, DinoFeatureExtractor
+
+    extractor = DinoFeatureExtractor(DinoConfig())
+    img = PILImage.fromarray(np.zeros((518, 518, 3), dtype=np.uint8))
+    attn = extractor.extract_attention_maps(img)
+    assert attn.ndim == 2
+    n_heads, n_patches = attn.shape
+    assert n_heads == 12        # ViT-B has 12 heads
+    assert n_patches > 0        # read dynamically; empirically 1369 (37x37) at 518px
+
+
+def test_extract_attention_maps_sums_to_one():
+    """Each head's attention sums to ~1.0 after per-head re-normalization."""
+    pytest.importorskip("torch")
+    from PIL import Image as PILImage
+    from src.features.dino_embeddings import DinoConfig, DinoFeatureExtractor
+
+    extractor = DinoFeatureExtractor(DinoConfig())
+    img = PILImage.fromarray(
+        np.random.default_rng(0).integers(0, 255, (518, 518, 3), dtype=np.uint8)
+    )
+    attn = extractor.extract_attention_maps(img)
+    row_sums = attn.sum(axis=-1)
+    np.testing.assert_allclose(row_sums, 1.0, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

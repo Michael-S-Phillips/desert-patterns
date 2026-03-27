@@ -100,7 +100,9 @@ class DinoFeatureExtractor:
         )
 
         self._processor = AutoImageProcessor.from_pretrained(self.config.model_name)
-        self._model = AutoModel.from_pretrained(self.config.model_name)
+        self._model = AutoModel.from_pretrained(
+            self.config.model_name, attn_implementation="eager"
+        )
         self._model.eval().to(self._device)
         logger.info("DINOv3 model loaded successfully")
 
@@ -168,6 +170,36 @@ class DinoFeatureExtractor:
         # Skip 1 CLS + 4 register tokens
         patch_tokens = outputs.last_hidden_state[0, 5:, :].cpu().numpy()
         return patch_tokens.astype(np.float32)
+
+    def extract_attention_maps(self, image: Image.Image) -> np.ndarray:
+        """Extract per-head CLS→patch attention from the last transformer block.
+
+        Returns the raw attention weights from the [CLS] token to each spatial
+        patch token, re-normalized per head so each row sums to 1.0.  The 4
+        register tokens are excluded from the slice.
+
+        Args:
+            image: PIL Image.
+
+        Returns:
+            2-D float32 array of shape ``(n_heads, n_patches)`` where
+            ``n_heads == 12`` for ViT-B and ``n_patches`` is derived
+            dynamically from the input resolution.
+        """
+        import torch
+
+        inputs = self.processor(images=image, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = self.model(**inputs, output_attentions=True)
+
+        # attentions[-1]: (1, n_heads, n_tokens, n_tokens)
+        # CLS row, skip CLS token + 4 register tokens → patch slice
+        attn = outputs.attentions[-1][0, :, 0, 5:].cpu().numpy().astype(np.float32)
+        # Re-normalize per head so each row sums to 1.0
+        attn = attn / (attn.sum(axis=-1, keepdims=True) + 1e-10)
+        return attn
 
     def extract_batch(
         self,
