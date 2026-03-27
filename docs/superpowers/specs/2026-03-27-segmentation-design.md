@@ -114,7 +114,7 @@ segmentation:
   iou_dedup_threshold: 0.5
 ```
 
-`load_segmentation_config(config_dict: dict) -> SegmentationConfig` reads the `segmentation:` sub-dict and populates the dataclass. Follows the same pattern as `load_classifier_config()`.
+`load_segmentation_config(config_dict: dict) -> SegmentationConfig` accepts the **full parsed YAML dict** and extracts the `segmentation:` sub-dict internally — same pattern as `load_classifier_config()`.
 
 ---
 
