@@ -31,7 +31,7 @@ The patch projection overlays (from `scripts/generate_classifier_figures.py`) sh
 
 For each image:
 
-1. **Attention map** — Extract patch tokens via `DinoFeatureExtractor.extract_patch_tokens()` → shape `(n_patches, 768)`. Derive `grid_size = int(round(np.sqrt(n_patches)))` dynamically (do not hardcode). Project onto `model.coef_[class_idx]` where `class_idx = list(model.classes_).index(class_name)` (the 768-d LR discriminative direction for the image's class): `activations = patch_tokens @ cls_coef` → `(n_patches,)`. Reshape to `(grid_size, grid_size)`, normalize to `[0, 1]`, upsample bilinearly to the **file's native resolution** (using `PIL.Image.BILINEAR`) — this is the size SAM will receive. Apply Gaussian smoothing (`sigma=2`). Save as a soft heatmap overlay PNG.
+1. **Attention map** — Pass the PIL image to `DinoFeatureExtractor.extract_patch_tokens()` (which internally runs the HuggingFace processor; do **not** resize the PIL image before passing it). The processor resizes to `input_size` (518px) before tokenizing, and the ViT-B/16 patch size is 16px. The empirically-observed output is `n_patches=196` (14×14 grid), confirmed at runtime in this codebase. Derive `grid_size = int(round(np.sqrt(n_patches)))` dynamically — do not hardcode 14. Output shape is `(n_patches, 768)`. Project onto `model.coef_[class_idx]` where `class_idx = list(model.classes_).index(class_name)`: `activations = patch_tokens @ cls_coef` → `(n_patches,)`. Reshape to `(grid_size, grid_size)`, normalize to `[0, 1]`, upsample bilinearly to the **file's native resolution** (PIL `.size` is `(width, height)`; for `PIL.Image.resize` pass `(width, height)`; for numpy indexing use `(height, width)`) — this is the size SAM will receive. Apply Gaussian smoothing (`sigma=2`). Save as a soft heatmap overlay PNG.
 
 2. **Binary attention mask** — Threshold the smoothed attention map using the method specified by `threshold_method`:
    - `otsu` (default): apply OpenCV Otsu thresholding (`cv2.threshold` with `cv2.THRESH_OTSU`) to the uint8-scaled map
@@ -73,7 +73,7 @@ outputs/figures/
 └── segmentation_gallery_jbio.png/.svg
 ```
 
-Summary gallery per class: 12 images in a 3×4 grid, selected as the highest-confidence examples for that class (same selection criterion as `fig_class_gallery` in `generate_classifier_figures.py`). Each thumbnail is the `_overlay.png` resized to 224×224. Uses `src.visualization.style.save_figure()` and project font/DPI conventions (300 DPI, Arial/DejaVu fallback, PNG + SVG).
+Summary gallery per class: 12 images in a 3×4 grid, selected as the top-12 highest-confidence examples for that class using `model.predict_proba(X)` on the cached embeddings `X` (same ranking as `fig_class_gallery` in `generate_classifier_figures.py`). Each thumbnail is the `_overlay.png` resized to 224×224. Uses `src.visualization.style.save_figure()` and project font/DPI conventions (300 DPI, Arial/DejaVu fallback, PNG + SVG).
 
 ---
 
@@ -88,10 +88,10 @@ Summary gallery per class: 12 images in a 3×4 grid, selected as the highest-con
 - `--image` — one or more image filenames (stems or full names); if set, only those images are processed and gallery figures are skipped
 
 **Steps:**
-1. Load config → `SegmentationConfig`
+1. Load config YAML → `SegmentationConfig` (from `segmentation:` sub-dict via `load_segmentation_config()`) and `DinoConfig` (from `dino:` sub-dict via `load_dino_config()`). Both are passed to `PatternSegmenter.__init__`.
 2. Load `lr_classifier.joblib` + `label_encoder.joblib` from `outputs/models/classifier/`
 3. Load cached embeddings + labels from `outputs/features/classifier_embeddings.npy` / `classifier_labels.npy`
-4. Scan labeled images via `scan_labeled_images()` (same sorted rglob order as training). Validate alignment with label cache: `assert [lbl for _, lbl in image_list] == list(y)`, raising a descriptive error if they disagree (stale cache). Use the image list to look up each image's `class_name` and the corresponding `model.coef_[class_idx]`.
+4. Scan labeled images via `scan_labeled_images()` (same sorted rglob order as training). Validate alignment with label cache: if `[lbl for _, lbl in image_list] != list(y)`, raise `ValueError("Image list and label cache are misaligned — re-run train_classifier.py to regenerate the cache")`. Use the image list to look up each image's `class_name` and the corresponding `model.coef_[class_idx]`.
 5. If `--image` provided, filter image list to matching stems/filenames; raise a descriptive error if no match found
 6. For each image: run pipeline (skip if overlay exists and not `--force`)
 7. If `--image` not set: generate per-class gallery figures
