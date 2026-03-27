@@ -31,26 +31,26 @@ The patch projection overlays (from `scripts/generate_classifier_figures.py`) sh
 
 For each image:
 
-1. **Attention map** — Extract patch tokens via `DinoFeatureExtractor.extract_patch_tokens()` → shape `(196, 768)`. Project onto `model.coef_[class_idx]` (the 768-d LR discriminative direction for the image's class): `activations = patch_tokens @ cls_coef` → `(196,)`. Reshape to `(14, 14)`, normalize to `[0, 1]`, upsample bilinearly to the original image size (using `PIL.Image.BILINEAR`), apply Gaussian smoothing (`sigma=2`). Save as a soft heatmap overlay PNG.
+1. **Attention map** — Extract patch tokens via `DinoFeatureExtractor.extract_patch_tokens()` → shape `(n_patches, 768)`. Derive `grid_size = int(round(np.sqrt(n_patches)))` dynamically (do not hardcode). Project onto `model.coef_[class_idx]` where `class_idx = list(model.classes_).index(class_name)` (the 768-d LR discriminative direction for the image's class): `activations = patch_tokens @ cls_coef` → `(n_patches,)`. Reshape to `(grid_size, grid_size)`, normalize to `[0, 1]`, upsample bilinearly to the **file's native resolution** (using `PIL.Image.BILINEAR`) — this is the size SAM will receive. Apply Gaussian smoothing (`sigma=2`). Save as a soft heatmap overlay PNG.
 
 2. **Binary attention mask** — Threshold the smoothed attention map using the method specified by `threshold_method`:
    - `otsu` (default): apply OpenCV Otsu thresholding (`cv2.threshold` with `cv2.THRESH_OTSU`) to the uint8-scaled map
    - `percentile`: threshold at `attention_percentile` (e.g., 0.70 → top 30% of activation values)
    Save as a binary PNG (0/255).
 
-3. **SAM instance masks** — Map the top-`n_foreground_prompts` highest-activation patch centroids to pixel coordinates in the original image → SAM foreground prompt points (label=1). Map the bottom-`n_background_prompts` patches → background points (label=0). For each foreground prompt point, call `SamPredictor.predict(point_coords, point_labels)` independently (each call yields 3 candidate masks at different scales; select the one with the highest SAM stability score). Deduplicate overlapping masks by IoU: discard any mask whose IoU with an already-accepted mask exceeds `iou_dedup_threshold`. Discard masks with area < `min_mask_area_fraction` × image area.
+3. **SAM instance masks** — Load the image from disk at native resolution as a uint8 RGB numpy array and pass it to `SamPredictor.set_image()`. (The attention map was already upsampled to this same native resolution in step 1, so the coordinate spaces match.) Map the top-`n_foreground_prompts` highest-activation patch centroids to pixel coordinates in the native-resolution image → SAM foreground prompt points (label=1). Map the bottom-`n_background_prompts` patches → background points (label=0). For each foreground prompt point, call `SamPredictor.predict(point_coords, point_labels)` independently (each call returns `(masks, iou_scores, logits)` with 3 candidate masks at different scales; select the mask with the highest predicted IoU score). Deduplicate overlapping masks by IoU: discard any mask whose IoU with an already-accepted mask exceeds `iou_dedup_threshold`. Discard masks with area < `min_mask_area_fraction` × image area.
 
 4. **Overlay PNG** — Composite: original image + per-instance colored masks at 50% alpha + instance boundary outlines + attention heatmap blended at 30% alpha underneath the masks. Save as `{image_stem}_overlay.png`.
 
-5. **Metadata JSON** — Save `{image_stem}_masks.json`: list of dicts, one per accepted instance mask: `{area_px, bbox_xyxy, centroid_xy, stability_score}`.
+5. **Metadata JSON** — Save `{image_stem}_masks.json`: list of dicts, one per accepted instance mask: `{area_px, bbox_xyxy, centroid_xy, iou_score}`.
 
 ### Patch centroid → pixel coordinate mapping
 
-Each of the 196 patches corresponds to one cell in a 14×14 grid. Patch index `i` maps to grid position `(row, col) = divmod(i, 14)`. The centroid pixel coordinate in the original image is:
+Patch index `i` maps to grid position `(row, col) = divmod(i, grid_size)` where `grid_size = int(round(np.sqrt(n_patches)))`. The centroid pixel coordinate in the native-resolution image (used for SAM prompts) is:
 
 ```
-cx = (col + 0.5) / 14 * image_width
-cy = (row + 0.5) / 14 * image_height
+cx = (col + 0.5) / grid_size * image_width
+cy = (row + 0.5) / grid_size * image_height
 ```
 
 ---
@@ -63,7 +63,7 @@ outputs/segmentations/
 │   ├── {stem}_overlay.png      # original + instance masks + attention heatmap
 │   ├── {stem}_attention.png    # soft heatmap overlay only
 │   ├── {stem}_mask.png         # binary attention mask (0/255)
-│   └── {stem}_masks.json       # [{area_px, bbox_xyxy, centroid_xy, stability_score}, ...]
+│   └── {stem}_masks.json       # [{area_px, bbox_xyxy, centroid_xy, iou_score}, ...]
 ├── big_pool/
 └── jbio/
 
@@ -73,7 +73,7 @@ outputs/figures/
 └── segmentation_gallery_jbio.png/.svg
 ```
 
-Summary gallery per class: 12 representative images in a 3×4 grid. Each thumbnail is the `_overlay.png` resized to 224×224. Uses `src.visualization.style.save_figure()` and project font/DPI conventions (300 DPI, Arial/DejaVu fallback, PNG + SVG).
+Summary gallery per class: 12 images in a 3×4 grid, selected as the highest-confidence examples for that class (same selection criterion as `fig_class_gallery` in `generate_classifier_figures.py`). Each thumbnail is the `_overlay.png` resized to 224×224. Uses `src.visualization.style.save_figure()` and project font/DPI conventions (300 DPI, Arial/DejaVu fallback, PNG + SVG).
 
 ---
 
@@ -91,7 +91,7 @@ Summary gallery per class: 12 representative images in a 3×4 grid. Each thumbna
 1. Load config → `SegmentationConfig`
 2. Load `lr_classifier.joblib` + `label_encoder.joblib` from `outputs/models/classifier/`
 3. Load cached embeddings + labels from `outputs/features/classifier_embeddings.npy` / `classifier_labels.npy`
-4. Scan labeled images via `scan_labeled_images()` (same sorted rglob order as training)
+4. Scan labeled images via `scan_labeled_images()` (same sorted rglob order as training). Validate alignment with label cache: `assert [lbl for _, lbl in image_list] == list(y)`, raising a descriptive error if they disagree (stale cache). Use the image list to look up each image's `class_name` and the corresponding `model.coef_[class_idx]`.
 5. If `--image` provided, filter image list to matching stems/filenames; raise a descriptive error if no match found
 6. For each image: run pipeline (skip if overlay exists and not `--force`)
 7. If `--image` not set: generate per-class gallery figures
@@ -143,7 +143,7 @@ class SegmentationResult:
     attention_map: np.ndarray        # float32, shape (H, W), values in [0, 1]
     binary_mask: np.ndarray          # uint8, shape (H, W), values 0 or 255
     instance_masks: list[np.ndarray] # each bool array shape (H, W)
-    stability_scores: list[float]    # one per instance mask
+    iou_scores: list[float]    # one per instance mask
     image_path: Path
     class_name: str
 ```
@@ -152,7 +152,7 @@ class SegmentationResult:
 
 - `__init__(self, classifier_model, seg_config: SegmentationConfig, dino_config: DinoConfig)` — lazy-loads DINOv3 extractor and SAM predictor on first use
 - `segment(self, image_path: Path, class_name: str) -> SegmentationResult` — runs the full per-image pipeline
-- `_compute_attention(self, patch_tokens: np.ndarray, cls_coef: np.ndarray, image_size: tuple[int, int]) -> np.ndarray` — steps 1–2
+- `_compute_attention(self, patch_tokens: np.ndarray, cls_coef: np.ndarray, image_size: tuple[int, int]) -> np.ndarray` — steps 1–2; `image_size` is `(width, height)` in PIL convention, matching `PIL.Image.size`
 - `_threshold(self, attention_map: np.ndarray) -> np.ndarray` — Otsu or percentile thresholding
 - `_run_sam(self, image: np.ndarray, attention_map: np.ndarray) -> tuple[list[np.ndarray], list[float]]` — prompt generation + SAM predict + deduplication
 - `_iou(self, mask_a: np.ndarray, mask_b: np.ndarray) -> float` — IoU between two boolean masks
