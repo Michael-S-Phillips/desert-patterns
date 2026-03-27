@@ -348,7 +348,7 @@ class ClaspSegmenter:
 
         pil_img = Image.open(image_path).convert("RGB")
         image_size = pil_img.size          # (width, height) PIL convention
-        image_np = np.asarray(pil_img)     # uint8 (H, W, 3) for DenseCRF
+        image_np = np.array(pil_img)        # uint8 (H, W, 3) for DenseCRF; writeable copy required by pydensecrf
 
         patch_tokens = self._get_extractor().extract_patch_tokens(pil_img)
         n_patches = patch_tokens.shape[0]
