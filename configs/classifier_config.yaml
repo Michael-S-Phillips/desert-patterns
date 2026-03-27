@@ -38,3 +38,17 @@ segmentation:
   attention_percentile: 0.70      # used only when threshold_method=percentile
   min_mask_area_fraction: 0.005
   iou_dedup_threshold: 0.5
+
+clasp:
+  output_dir: outputs/segmentations_clasp
+  bandwidth: 0.5
+  min_clusters: 2
+  max_clusters: 15
+  dense_crf: true
+  crf_iterations: 20
+  crf_gt_prob: 0.8
+  crf_gaussian_sxy: 4
+  crf_gaussian_compat: 4
+  crf_bilateral_sxy: 80
+  crf_bilateral_srgb: 13
+  crf_bilateral_compat: 10
