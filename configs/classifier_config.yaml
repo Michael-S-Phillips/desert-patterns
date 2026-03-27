@@ -28,3 +28,13 @@ output:
   figures_dir: outputs/figures
   embedding_cache: outputs/features/classifier_embeddings.npy
   label_cache: outputs/features/classifier_labels.npy
+
+segmentation:
+  sam_checkpoint: /Volumes/Rohan/Software/sam/sam_vit_b_01ec64.pth
+  output_dir: outputs/segmentations
+  n_foreground_prompts: 5
+  n_background_prompts: 5
+  threshold_method: otsu          # otsu | percentile
+  attention_percentile: 0.70      # used only when threshold_method=percentile
+  min_mask_area_fraction: 0.005
+  iou_dedup_threshold: 0.5
