@@ -102,3 +102,54 @@ def test_eigengap_k_monotone():
     k = segmenter._eigengap_k(eigenvalues)
     assert isinstance(k, int)
     assert 1 <= k <= len(eigenvalues)
+
+
+# ---------------------------------------------------------------------------
+# Silhouette K-search tests
+# ---------------------------------------------------------------------------
+
+
+def test_search_best_k_in_range():
+    """Returns K within the bandwidth-clamped range."""
+    segmenter = _make_segmenter()
+    rng = np.random.default_rng(42)
+    # Three well-separated clusters in 2D
+    centers = np.array([[0, 0], [10, 0], [0, 10]], dtype=np.float32)
+    pts = np.vstack([c + rng.standard_normal((20, 2)) * 0.3 for c in centers]).astype(np.float32)
+    k_opt = 3
+    k, labels = segmenter._search_best_k(pts, k_opt)
+    k_lo = max(2, int(np.floor(k_opt * (1 - 0.5))))   # 2
+    k_hi = min(15, int(np.ceil(k_opt * (1 + 0.5))))   # 5
+    assert k_lo <= k <= k_hi
+    assert labels.shape == (60,)
+
+
+def test_search_best_k_respects_bounds():
+    """K_opt near min_clusters clamps correctly."""
+    segmenter = _make_segmenter()
+    rng = np.random.default_rng(7)
+    pts = rng.standard_normal((30, 3)).astype(np.float32)
+    k, labels = segmenter._search_best_k(pts, k_opt=2)
+    assert k >= segmenter._clasp_config.min_clusters
+    assert k <= segmenter._clasp_config.max_clusters
+
+
+# ---------------------------------------------------------------------------
+# Label map upsample tests
+# ---------------------------------------------------------------------------
+
+
+def test_make_label_map_shape():
+    segmenter = _make_segmenter()
+    labels = np.zeros(196, dtype=np.int32)
+    lm = segmenter._make_label_map(labels, image_size=(320, 240), n_patches=196)
+    assert lm.shape == (240, 320)   # (height, width)
+
+
+def test_make_label_map_label_range():
+    segmenter = _make_segmenter()
+    k = 4
+    labels = (np.arange(196) % k).astype(np.int32)
+    lm = segmenter._make_label_map(labels, image_size=(224, 224), n_patches=196)
+    assert lm.min() >= 0
+    assert lm.max() < k
