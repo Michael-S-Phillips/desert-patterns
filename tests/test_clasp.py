@@ -153,3 +153,42 @@ def test_make_label_map_label_range():
     lm = segmenter._make_label_map(labels, image_size=(224, 224), n_patches=196)
     assert lm.min() >= 0
     assert lm.max() < k
+
+
+# ---------------------------------------------------------------------------
+# DenseCRF tests
+# ---------------------------------------------------------------------------
+
+
+def test_apply_dense_crf_skipped():
+    """dense_crf=False returns label_map unchanged without touching pydensecrf."""
+    segmenter = _make_segmenter(dense_crf=False)
+    label_map = np.zeros((100, 100), dtype=np.int32)
+    image_np = np.zeros((100, 100, 3), dtype=np.uint8)
+    result = segmenter._apply_dense_crf(image_np, label_map, k=2)
+    np.testing.assert_array_equal(result, label_map)
+
+
+def test_apply_dense_crf_shape():
+    """DenseCRF refinement preserves label map shape."""
+    pytest.importorskip("pydensecrf")
+    segmenter = _make_segmenter(dense_crf=True)
+    rng = np.random.default_rng(0)
+    h, w = 56, 56
+    image_np = rng.integers(0, 255, (h, w, 3), dtype=np.uint8)
+    label_map = (rng.integers(0, 3, (h, w))).astype(np.int32)
+    result = segmenter._apply_dense_crf(image_np, label_map, k=3)
+    assert result.shape == (h, w)
+    assert result.dtype == np.int32
+
+
+# ---------------------------------------------------------------------------
+# Lazy-init test
+# ---------------------------------------------------------------------------
+
+
+def test_clasp_segmenter_lazy_init():
+    """ClaspSegmenter does not load DINOv3 at construction."""
+    from src.segmentation.clasp import ClaspConfig, ClaspSegmenter
+    segmenter = ClaspSegmenter(ClaspConfig(), DinoConfig())
+    assert segmenter._extractor is None
