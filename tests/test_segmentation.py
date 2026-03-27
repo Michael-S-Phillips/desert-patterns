@@ -40,6 +40,64 @@ def test_load_segmentation_config_missing_section():
     assert cfg.n_foreground_prompts == SegmentationConfig.n_foreground_prompts
 
 
+def test_segmentation_config_new_field_defaults():
+    from src.segmentation.segment import SegmentationConfig
+    cfg = SegmentationConfig()
+    assert cfg.attention_mode == "classifier"
+    assert cfg.prompt_strategy == "topk"
+    assert cfg.sam_version == "sam1"
+    assert cfg.sam2_checkpoint == ""
+    assert cfg.sam2_model_cfg == "sam2_hiera_b+.yaml"
+
+
+def test_load_segmentation_config_new_fields():
+    from src.segmentation.segment import load_segmentation_config
+    cfg = load_segmentation_config({
+        "segmentation": {
+            "attention_mode": "self_attention",
+            "prompt_strategy": "fps",
+            "sam_version": "sam2",
+            "sam2_checkpoint": "/tmp/sam2.pt",
+            "sam2_model_cfg": "sam2_hiera_l.yaml",
+        }
+    })
+    assert cfg.attention_mode == "self_attention"
+    assert cfg.prompt_strategy == "fps"
+    assert cfg.sam_version == "sam2"
+    assert cfg.sam2_checkpoint == "/tmp/sam2.pt"
+    assert cfg.sam2_model_cfg == "sam2_hiera_l.yaml"
+
+
+def test_load_segmentation_config_new_field_defaults():
+    """load_segmentation_config({}) returns correct defaults for all 5 new fields."""
+    from src.segmentation.segment import SegmentationConfig, load_segmentation_config
+    cfg = load_segmentation_config({})
+    assert cfg.attention_mode == "classifier"
+    assert cfg.prompt_strategy == "topk"
+    assert cfg.sam_version == "sam1"
+    assert cfg.sam2_checkpoint == ""
+    assert cfg.sam2_model_cfg == "sam2_hiera_b+.yaml"
+
+
+def test_segmenter_no_classifier_self_attention_ok():
+    """Constructing with classifier_model=None is fine in self_attention mode."""
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+    from src.features.dino_embeddings import DinoConfig
+    cfg = SegmentationConfig(attention_mode="self_attention")
+    PatternSegmenter(None, cfg, DinoConfig())  # should not raise
+
+
+def test_segmenter_no_classifier_raises_on_segment():
+    """segment() raises ValueError when classifier mode but no classifier."""
+    from pathlib import Path
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+    from src.features.dino_embeddings import DinoConfig
+    cfg = SegmentationConfig(attention_mode="classifier")
+    segmenter = PatternSegmenter(None, cfg, DinoConfig())
+    with pytest.raises(ValueError, match="classifier_model"):
+        segmenter.segment(Path("dummy.jpg"), "mudcrack")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -33,6 +33,11 @@ class SegmentationConfig:
     attention_percentile: float = 0.70
     min_mask_area_fraction: float = 0.005
     iou_dedup_threshold: float = 0.5
+    attention_mode: str = "classifier"       # "classifier" | "self_attention"
+    prompt_strategy: str = "topk"            # "topk" | "fps"
+    sam_version: str = "sam1"               # "sam1" | "sam2"
+    sam2_checkpoint: str = ""
+    sam2_model_cfg: str = "sam2_hiera_b+.yaml"
 
 
 def load_segmentation_config(config_dict: dict) -> SegmentationConfig:
@@ -57,6 +62,11 @@ def load_segmentation_config(config_dict: dict) -> SegmentationConfig:
         attention_percentile=seg.get("attention_percentile", SegmentationConfig.attention_percentile),
         min_mask_area_fraction=seg.get("min_mask_area_fraction", SegmentationConfig.min_mask_area_fraction),
         iou_dedup_threshold=seg.get("iou_dedup_threshold", SegmentationConfig.iou_dedup_threshold),
+        attention_mode=seg.get("attention_mode", SegmentationConfig.attention_mode),
+        prompt_strategy=seg.get("prompt_strategy", SegmentationConfig.prompt_strategy),
+        sam_version=seg.get("sam_version", SegmentationConfig.sam_version),
+        sam2_checkpoint=seg.get("sam2_checkpoint", SegmentationConfig.sam2_checkpoint),
+        sam2_model_cfg=seg.get("sam2_model_cfg", SegmentationConfig.sam2_model_cfg),
     )
 
 
@@ -95,7 +105,7 @@ class PatternSegmenter:
 
     def __init__(
         self,
-        classifier_model: Any,
+        classifier_model: Any | None,
         seg_config: SegmentationConfig,
         dino_config: Any,
     ) -> None:
@@ -365,8 +375,14 @@ class PatternSegmenter:
         Returns:
             SegmentationResult with attention map, binary mask, and instance masks.
         """
-        class_idx = list(self._model.classes_).index(class_name)
-        cls_coef = self._model.coef_[class_idx]  # (768,)
+        if self._seg_config.attention_mode == "classifier":
+            if self._model is None:
+                raise ValueError(
+                    "classifier_model is required when attention_mode='classifier'. "
+                    "Pass a fitted LogisticRegression or set attention_mode='self_attention'."
+                )
+            class_idx = list(self._model.classes_).index(class_name)
+            cls_coef = self._model.coef_[class_idx]  # (768,)
 
         pil_img = Image.open(image_path).convert("RGB")
         image_size = pil_img.size  # (width, height) in PIL convention

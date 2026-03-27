@@ -38,6 +38,11 @@ segmentation:
   attention_percentile: 0.70      # used only when threshold_method=percentile
   min_mask_area_fraction: 0.005
   iou_dedup_threshold: 0.5
+  attention_mode: classifier          # classifier | self_attention
+  prompt_strategy: topk               # topk | fps
+  sam_version: sam1                   # sam1 | sam2
+  sam2_checkpoint: ""
+  sam2_model_cfg: sam2_hiera_b+.yaml
 
 clasp:
   output_dir: outputs/segmentations_clasp
