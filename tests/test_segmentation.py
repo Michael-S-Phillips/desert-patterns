@@ -526,3 +526,79 @@ def test_patch_centroids_fps_in_bounds():
     assert fg[:, 0].max() <= 300  # x ≤ width
     assert fg[:, 1].max() <= 200  # y ≤ height
     assert fg.min() >= 0
+
+
+# ---------------------------------------------------------------------------
+# SAM 2 predictor test
+# ---------------------------------------------------------------------------
+
+
+def test_get_sam2_predictor_type():
+    """_get_sam_predictor returns SAM2ImagePredictor when sam_version='sam2'."""
+    pytest.importorskip("sam2")
+    from pathlib import Path
+    from sam2.sam2_image_predictor import SAM2ImagePredictor
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+    from src.features.dino_embeddings import DinoConfig
+
+    checkpoint = "/Volumes/Fangorn/Software/sam2/sam2_hiera_base_plus.pt"
+    if not Path(checkpoint).exists():
+        pytest.skip(f"SAM 2 checkpoint not found at {checkpoint}")
+
+    cfg = SegmentationConfig(
+        sam_version="sam2",
+        sam2_checkpoint=checkpoint,
+        sam2_model_cfg="sam2_hiera_b+.yaml",
+    )
+    segmenter = PatternSegmenter(MagicMock(), cfg, DinoConfig())
+    predictor = segmenter._get_sam_predictor()
+    assert isinstance(predictor, SAM2ImagePredictor)
+
+
+# ---------------------------------------------------------------------------
+# segment() self_attention path (mocked)
+# ---------------------------------------------------------------------------
+
+
+def test_segment_self_attention_path():
+    """segment() works with attention_mode='self_attention' and mocked extractors."""
+    pytest.importorskip("torch")
+    from pathlib import Path
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+    from src.features.dino_embeddings import DinoConfig
+
+    cfg = SegmentationConfig(attention_mode="self_attention")
+    segmenter = PatternSegmenter(None, cfg, DinoConfig())
+
+    # Mock attention extraction
+    h, w = 100, 100
+    n_patches = 16
+    mock_extractor = MagicMock()
+    mock_extractor.extract_attention_maps.return_value = (
+        np.full((2, n_patches), 1.0 / n_patches, dtype=np.float32)
+    )
+    segmenter._extractor = mock_extractor
+
+    # Mock SAM predictor to return one valid mask
+    mock_predictor = MagicMock()
+    mask = np.zeros((h, w), dtype=bool)
+    mask[20:60, 20:60] = True
+    mock_predictor.predict.return_value = (
+        np.array([mask, mask, mask]),
+        np.array([0.9, 0.8, 0.7]),
+        None,
+    )
+    segmenter._sam_predictor = mock_predictor
+
+    import tempfile
+    from PIL import Image as PILImage
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        tmp_path = Path(f.name)
+    PILImage.fromarray(np.zeros((h, w, 3), dtype=np.uint8)).save(tmp_path)
+
+    try:
+        result = segmenter.segment(tmp_path, "mudcrack")
+        assert result.attention_map.shape == (h, w)
+        assert isinstance(result.instance_masks, list)
+    finally:
+        tmp_path.unlink(missing_ok=True)

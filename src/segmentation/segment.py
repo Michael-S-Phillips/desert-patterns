@@ -128,13 +128,30 @@ class PatternSegmenter:
     def _get_sam_predictor(self) -> Any:
         if self._sam_predictor is None:
             import torch
-            from segment_anything import SamPredictor, sam_model_registry
 
             device = "mps" if torch.backends.mps.is_available() else "cpu"
-            sam = sam_model_registry["vit_b"](checkpoint=self._seg_config.sam_checkpoint)
-            sam.to(device)
-            self._sam_predictor = SamPredictor(sam)
-            logger.info("SAM loaded on device=%s", device)
+
+            if self._seg_config.sam_version == "sam2":
+                from sam2.build_sam import build_sam2
+                from sam2.sam2_image_predictor import SAM2ImagePredictor
+
+                sam2_model = build_sam2(
+                    self._seg_config.sam2_model_cfg,
+                    self._seg_config.sam2_checkpoint,
+                    device=device,
+                )
+                self._sam_predictor = SAM2ImagePredictor(sam2_model)
+                logger.info("SAM 2 loaded on device=%s", device)
+            else:  # "sam1"
+                from segment_anything import SamPredictor, sam_model_registry
+
+                sam = sam_model_registry["vit_b"](
+                    checkpoint=self._seg_config.sam_checkpoint
+                )
+                sam.to(device)
+                self._sam_predictor = SamPredictor(sam)
+                logger.info("SAM loaded on device=%s", device)
+
         return self._sam_predictor
 
     # ------------------------------------------------------------------
@@ -478,35 +495,38 @@ class PatternSegmenter:
     def segment(self, image_path: Path, class_name: str) -> SegmentationResult:
         """Run full segmentation pipeline for a single image.
 
-        Loads the image at native resolution, extracts DINOv3 patch tokens,
-        computes the attention map, thresholds it, and runs SAM with the
-        attention-derived prompt points.
+        Supports two attention modes (set via ``seg_config.attention_mode``):
+
+        - ``"classifier"``: uses LR coefficient × patch tokens (requires classifier_model)
+        - ``"self_attention"``: uses max-entropy DINOv3 self-attention head (unsupervised)
 
         Args:
             image_path: Path to the image file (JPEG or PNG).
-            class_name: The image's true class label (e.g. "mudcrack").
-                        Must be present in ``classifier_model.classes_``.
+            class_name: The image's true class label (e.g. ``"mudcrack"``).
+                        Only required when ``attention_mode="classifier"``.
 
         Returns:
             SegmentationResult with attention map, binary mask, and instance masks.
         """
-        if self._seg_config.attention_mode == "classifier":
-            if self._model is None:
-                raise ValueError(
-                    "classifier_model is required when attention_mode='classifier'. "
-                    "Pass a fitted LogisticRegression or set attention_mode='self_attention'."
-                )
-            class_idx = list(self._model.classes_).index(class_name)
-            cls_coef = self._model.coef_[class_idx]  # (768,)
+        if self._seg_config.attention_mode == "classifier" and self._model is None:
+            raise ValueError(
+                "classifier_model is required when attention_mode='classifier'. "
+                "Pass a fitted LogisticRegression or set attention_mode='self_attention'."
+            )
 
         pil_img = Image.open(image_path).convert("RGB")
-        image_size = pil_img.size  # (width, height) in PIL convention
-        image_np = np.asarray(pil_img)  # (H, W, 3) uint8 for SAM
+        image_size = pil_img.size          # (width, height) PIL convention
+        image_np = np.asarray(pil_img)     # (H, W, 3) uint8 for SAM
 
-        patch_tokens = self._get_extractor().extract_patch_tokens(pil_img)
-        n_patches = patch_tokens.shape[0]
+        if self._seg_config.attention_mode == "classifier":
+            class_idx = list(self._model.classes_).index(class_name)
+            cls_coef = self._model.coef_[class_idx]  # (768,)
+            patch_tokens = self._get_extractor().extract_patch_tokens(pil_img)
+            n_patches = patch_tokens.shape[0]
+            attention_map = self._compute_attention(patch_tokens, cls_coef, image_size)
+        else:  # "self_attention"
+            attention_map, n_patches = self._compute_self_attention(pil_img, image_size)
 
-        attention_map = self._compute_attention(patch_tokens, cls_coef, image_size)
         binary_mask = self._threshold(attention_map)
         instance_masks, iou_scores = self._run_sam(image_np, attention_map, n_patches)
 
