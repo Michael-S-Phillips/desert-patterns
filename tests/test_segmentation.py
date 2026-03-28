@@ -442,3 +442,87 @@ def test_compute_self_attention_returns_n_patches():
     dummy = PILImage.fromarray(np.zeros((84, 84, 3), dtype=np.uint8))
     _, returned_n = segmenter._compute_self_attention(dummy, (84, 84))
     assert returned_n == n_patches
+
+
+# ---------------------------------------------------------------------------
+# _farthest_point_sample tests
+# ---------------------------------------------------------------------------
+
+
+def test_fps_returns_correct_count():
+    segmenter = _make_segmenter()
+    candidates = np.arange(25, dtype=int)  # 25 patch indices
+    selected = segmenter._farthest_point_sample(candidates, grid_size=5, n_points=4)
+    assert len(selected) == 4
+
+
+def test_fps_no_duplicates():
+    segmenter = _make_segmenter()
+    candidates = np.arange(20, dtype=int)
+    selected = segmenter._farthest_point_sample(candidates, grid_size=5, n_points=5)
+    assert len(selected) == len(set(selected.tolist()))
+
+
+def test_fps_fewer_candidates_than_n_points():
+    """Returns all candidates when len(candidates) <= n_points."""
+    segmenter = _make_segmenter()
+    candidates = np.array([0, 1, 2], dtype=int)
+    selected = segmenter._farthest_point_sample(candidates, grid_size=5, n_points=6)
+    assert set(selected.tolist()) == {0, 1, 2}
+
+
+def test_fps_more_spread_than_topk():
+    """FPS selects points more spatially spread than top-K from a clustered set."""
+    segmenter = _make_segmenter()
+    grid_size = 10
+    # 6 candidates in top-left, 4 candidates in bottom-right
+    topleft = [0, 1, 10, 11, 20, 21]    # rows 0-2, cols 0-1
+    botright = [88, 89, 98, 99]          # rows 8-9, cols 8-9
+    candidates = np.array(topleft + botright, dtype=int)
+
+    fps_sel = segmenter._farthest_point_sample(candidates, grid_size, n_points=3)
+    topk_sel = candidates[:3]  # first 3 = all top-left cluster
+
+    def mean_pairwise_dist(idxs: np.ndarray) -> float:
+        rows = idxs // grid_size
+        cols = idxs % grid_size
+        coords = np.stack([rows, cols], axis=1).astype(float)
+        dists = [
+            np.linalg.norm(coords[i] - coords[j])
+            for i in range(len(coords))
+            for j in range(i + 1, len(coords))
+        ]
+        return float(np.mean(dists))
+
+    assert mean_pairwise_dist(fps_sel) > mean_pairwise_dist(topk_sel)
+
+
+# ---------------------------------------------------------------------------
+# _patch_centroids FPS branch tests
+# ---------------------------------------------------------------------------
+
+
+def _make_segmenter_fps():
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+    from src.features.dino_embeddings import DinoConfig
+    cfg = SegmentationConfig(prompt_strategy="fps")
+    return PatternSegmenter(MagicMock(), cfg, DinoConfig())
+
+
+def test_patch_centroids_fps_correct_count():
+    """FPS branch still returns n_foreground_prompts and n_background_prompts points."""
+    segmenter = _make_segmenter_fps()
+    attn = np.random.default_rng(5).random((100, 100)).astype(np.float32)
+    fg, bg = segmenter._patch_centroids(attn, n_patches=196)
+    assert fg.shape == (5, 2)
+    assert bg.shape == (5, 2)
+
+
+def test_patch_centroids_fps_in_bounds():
+    """FPS-selected centroids are within the image bounds."""
+    segmenter = _make_segmenter_fps()
+    attn = np.random.default_rng(6).random((200, 300)).astype(np.float32)
+    fg, bg = segmenter._patch_centroids(attn, n_patches=196)
+    assert fg[:, 0].max() <= 300  # x ≤ width
+    assert fg[:, 1].max() <= 200  # y ≤ height
+    assert fg.min() >= 0

@@ -277,6 +277,44 @@ class PatternSegmenter:
     # Prompt generation
     # ------------------------------------------------------------------
 
+    def _farthest_point_sample(
+        self,
+        candidates: np.ndarray,
+        grid_size: int,
+        n_points: int,
+    ) -> np.ndarray:
+        """Select spatially diverse patch indices via farthest-point sampling.
+
+        Seeds from the first candidate (caller should pre-sort descending by
+        attention so the highest-attention patch is the seed).
+
+        Args:
+            candidates: 1-D int array of flat patch indices.
+            grid_size: side length of the patch grid (e.g. 14 for 196 patches).
+            n_points: number of points to select.
+
+        Returns:
+            Selected flat patch indices, shape (min(n_points, len(candidates)),).
+        """
+        if len(candidates) <= n_points:
+            return candidates
+
+        rows = candidates // grid_size
+        cols = candidates % grid_size
+        coords = np.stack([rows, cols], axis=1).astype(np.float32)  # (N, 2)
+
+        selected_local = [0]  # seed: first candidate (highest attention)
+        min_dists = np.full(len(candidates), np.inf)
+
+        for _ in range(n_points - 1):
+            last = coords[selected_local[-1]]
+            dists = np.linalg.norm(coords - last, axis=1)
+            min_dists = np.minimum(min_dists, dists)
+            min_dists[selected_local] = -np.inf  # exclude already selected
+            selected_local.append(int(np.argmax(min_dists)))
+
+        return candidates[np.array(selected_local)]
+
     def _patch_centroids(
         self,
         attention_map: np.ndarray,
@@ -311,8 +349,21 @@ class PatternSegmenter:
         n_bg = min(self._seg_config.n_background_prompts, n_patches)
 
         sorted_idx = np.argsort(patch_activations)
-        fg_indices = sorted_idx[-n_fg:][::-1]  # highest activation first
-        bg_indices = sorted_idx[:n_bg]          # lowest activation first
+
+        if self._seg_config.prompt_strategy == "fps":
+            median_val = float(np.median(patch_activations))
+            # Foreground: at or above median, sorted descending (seed = highest attn patch)
+            fg_mask = patch_activations >= median_val
+            fg_candidates = np.where(fg_mask)[0]
+            fg_candidates = fg_candidates[np.argsort(patch_activations[fg_candidates])[::-1]]
+            # Background: below median, sorted ascending (seed = lowest attn patch)
+            bg_candidates = np.where(~fg_mask)[0]
+            bg_candidates = bg_candidates[np.argsort(patch_activations[bg_candidates])]
+            fg_indices = self._farthest_point_sample(fg_candidates, grid_size, n_fg)
+            bg_indices = self._farthest_point_sample(bg_candidates, grid_size, n_bg)
+        else:  # "topk"
+            fg_indices = sorted_idx[-n_fg:][::-1]  # highest activation first
+            bg_indices = sorted_idx[:n_bg]          # lowest activation first
 
         def to_pixel(patch_idx: int) -> list[float]:
             row, col = divmod(int(patch_idx), grid_size)
