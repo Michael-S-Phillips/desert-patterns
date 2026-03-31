@@ -52,7 +52,22 @@ Both are gated by config flags with no breaking changes to existing code or test
   #   → gaussian_filter(sigma=2)
   #   → min-max normalize to [0, 1]
   # This block must be present once, after the if/else, operating on `selected` and `n_patches`.
+  entropy = float(-(selected * np.log(selected + 1e-10)).sum())
+  return attn_map, n_patches, entropy
   ```
+
+  The return type of `_compute_self_attention()` changes from `tuple[np.ndarray, int]` to `tuple[np.ndarray, int, float]`. The caller in `segment()` unpacks all three:
+  ```python
+  attention_map, n_patches, entropy = self._compute_self_attention(pil_img, image_size)
+  ```
+  and stores `entropy` in the `SegmentationResult`:
+  ```python
+  return SegmentationResult(
+      ...
+      attention_entropy=entropy,
+  )
+  ```
+  For the `"classifier"` path, `attention_entropy=None` (the default).
 
 - **`src/segmentation/segment.py`** — update `load_segmentation_config()`:
   Add after the `sam2_model_cfg` line:
