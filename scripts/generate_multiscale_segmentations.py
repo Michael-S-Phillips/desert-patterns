@@ -128,7 +128,7 @@ def _save_per_image_outputs(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     pil_orig = PILImage.open(result.image_path).convert("RGB")
-    overlay = np.asarray(pil_orig.copy())
+    overlay = np.array(pil_orig)
     for i, mask in enumerate(result.instance_masks):
         color = tuple(
             int(c * 255)
@@ -202,7 +202,7 @@ def generate_comparison_figure(
             if result.attention_map is not None:
                 ax_row[1].imshow(result.attention_map, cmap="cividis", vmin=0, vmax=1)
             pil_orig = PILImage.open(result.image_path).convert("RGB")
-            overlay = np.asarray(pil_orig.copy())
+            overlay = np.array(pil_orig)
             for i, mask in enumerate(result.instance_masks):
                 color = tuple(
                     int(c * 255)
@@ -241,7 +241,11 @@ def run_site(
 ) -> None:
     """Run segmentation for all images in a site and produce outputs."""
     if segmenter_type == "sam":
+        from dataclasses import replace
         from src.segmentation.segment import PatternSegmenter
+        # Multiscale script has no classifier — always use self_attention
+        if seg_config.attention_mode == "classifier":
+            seg_config = replace(seg_config, attention_mode="self_attention")
         segmenter = PatternSegmenter(None, seg_config, dino_config)
         include_entropy = True
     else:
