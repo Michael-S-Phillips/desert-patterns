@@ -32,6 +32,8 @@ Both are gated by config flags with no breaking changes to existing code or test
   - `"last"` → existing path (`extract_attention_maps()` → `_select_attention_head()`), no change
   - `"best"` → new path (`extract_all_layer_attentions()` → `_select_best_layer_and_head()` → index `all_layer_attns[layer_idx, head_idx]` → `(n_patches,)` vector → existing upsample/smooth/threshold path)
 
+- **`src/segmentation/segment.py`** — update `SegmentationResult` to add `attention_entropy: float | None = None`. This field is populated by `segment()` when `attention_mode="self_attention"` (computed as `-(selected * np.log(selected + 1e-10)).sum()` from the patch-level vector before upsampling). It is `None` when `attention_mode="classifier"`. This allows the multiscale script to average per-image entropy values from `SegmentationResult.attention_entropy` without accessing `segment()`'s internal variables.
+
 - **`src/segmentation/segment.py`** — update `_compute_self_attention()` to branch on `attention_layer`:
   ```python
   if self._seg_config.attention_layer == "best":
@@ -78,7 +80,7 @@ Pipeline:
 5. Run the configured segmenter (`PatternSegmenter` in `self_attention` mode, or `ClaspSegmenter`) on each image
 6. Save per-image outputs to `outputs/segmentations_multiscale/{site_name}/{altitude_m}m/`
 7. Produce per-site comparison figure (see layout below)
-8. Write per-site JSON summary: `{"{altitude_m}m": {n_images, mean_n_instances, mean_mask_area_fraction, mean_attention_entropy}}`; for `ClaspSegmenter`, `mean_attention_entropy` is omitted (no attention map). For `PatternSegmenter`, `mean_attention_entropy` is the mean over images of the Shannon entropy computed from the patch-level attention vector (`selected`, shape `(n_patches,)`, sums to 1.0) before upsampling — not from the final `(H, W)` attention map.
+8. Write per-site JSON summary: `{"{altitude_m}m": {n_images, mean_n_instances, mean_mask_area_fraction, mean_attention_entropy}}`; for `ClaspSegmenter`, `mean_attention_entropy` is omitted (no attention map). For `PatternSegmenter`, `mean_attention_entropy` is the mean of `SegmentationResult.attention_entropy` across images at that altitude (pre-upsampling patch-level entropy, see `SegmentationResult` change above).
 
 **CLI:**
 ```
@@ -174,7 +176,7 @@ No torch-dependent tests for B (mocked segmenters throughout).
 | File | Action |
 |------|--------|
 | `src/features/dino_embeddings.py` | Add `extract_all_layer_attentions()` |
-| `src/segmentation/segment.py` | Add `attention_layer` config field, `_select_best_layer_and_head()`, update `_compute_self_attention()`, update `load_segmentation_config()` |
+| `src/segmentation/segment.py` | Add `attention_layer` config field, `attention_entropy` field to `SegmentationResult`, `_select_best_layer_and_head()`, update `_compute_self_attention()`, update `segment()`, update `load_segmentation_config()` |
 | `configs/classifier_config.yaml` | Add `attention_layer: last` |
 | `scripts/generate_multiscale_segmentations.py` | Create new script |
 | `tests/test_segmentation.py` | Add A3 tests |
