@@ -30,7 +30,7 @@ output:
   label_cache: outputs/features/classifier_labels.npy
 
 segmentation:
-  sam_checkpoint: /Volumes/Rohan/Software/sam/sam_vit_b_01ec64.pth
+  sam_checkpoint: /Volumes/Fangorn/Software/sam/sam_vit_b_01ec64.pth
   output_dir: outputs/segmentations
   n_foreground_prompts: 5
   n_background_prompts: 5
@@ -43,6 +43,7 @@ segmentation:
   sam_version: sam1                   # sam1 | sam2
   sam2_checkpoint: ""
   sam2_model_cfg: sam2_hiera_b+.yaml
+  attention_layer: last               # last | best
 
 clasp:
   output_dir: outputs/segmentations_clasp

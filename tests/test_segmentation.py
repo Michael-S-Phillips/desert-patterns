@@ -133,6 +133,40 @@ def test_extract_attention_maps_sums_to_one():
     np.testing.assert_allclose(row_sums, 1.0, atol=1e-5)
 
 
+def test_extract_all_layer_attentions_shape():
+    """extract_all_layer_attentions returns (n_layers, n_heads, n_patches)."""
+    pytest.importorskip("torch")
+    from PIL import Image as PILImage
+    from src.features.dino_embeddings import DinoConfig, DinoFeatureExtractor
+
+    extractor = DinoFeatureExtractor(DinoConfig())
+    img = PILImage.fromarray(np.zeros((518, 518, 3), dtype=np.uint8))
+    result = extractor.extract_all_layer_attentions(img)
+    assert result.ndim == 3
+    n_layers, n_heads, n_patches = result.shape
+    assert n_layers == 12
+    assert n_heads == 12
+    assert n_patches > 0
+
+
+def test_extract_all_layer_attentions_sums_to_one():
+    """Each [layer, head] row of extract_all_layer_attentions sums to 1.0 or 0.0.
+
+    Early-layer heads sometimes concentrate all attention on CLS/register tokens,
+    leaving the patch slice all-zero. Those rows sum to 0; the rest sum to ~1.
+    """
+    pytest.importorskip("torch")
+    from PIL import Image as PILImage
+    from src.features.dino_embeddings import DinoConfig, DinoFeatureExtractor
+
+    extractor = DinoFeatureExtractor(DinoConfig())
+    img = PILImage.fromarray(np.zeros((518, 518, 3), dtype=np.uint8))
+    result = extractor.extract_all_layer_attentions(img)
+    row_sums = result.sum(axis=-1)  # (n_layers, n_heads)
+    # Each row must sum to either ~1.0 (normalized patch attention) or ~0.0 (no patch attention)
+    assert np.all((np.abs(row_sums - 1.0) < 1e-4) | (row_sums < 1e-4))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

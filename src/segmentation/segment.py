@@ -38,6 +38,7 @@ class SegmentationConfig:
     sam_version: str = "sam1"               # "sam1" | "sam2"
     sam2_checkpoint: str = ""
     sam2_model_cfg: str = "sam2_hiera_b+.yaml"
+    attention_layer: str = "last"            # "last" | "best"
 
 
 def load_segmentation_config(config_dict: dict) -> SegmentationConfig:
@@ -67,6 +68,7 @@ def load_segmentation_config(config_dict: dict) -> SegmentationConfig:
         sam_version=seg.get("sam_version", SegmentationConfig.sam_version),
         sam2_checkpoint=seg.get("sam2_checkpoint", SegmentationConfig.sam2_checkpoint),
         sam2_model_cfg=seg.get("sam2_model_cfg", SegmentationConfig.sam2_model_cfg),
+        attention_layer=seg.get("attention_layer", SegmentationConfig.attention_layer),
     )
 
 
@@ -85,6 +87,7 @@ class SegmentationResult:
     iou_scores: list[float]          # one per instance mask (SAM predicted IoU)
     image_path: Path
     class_name: str
+    attention_entropy: float | None = None
 
 
 # ---------------------------------------------------------------------------

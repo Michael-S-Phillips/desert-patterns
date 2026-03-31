@@ -201,6 +201,38 @@ class DinoFeatureExtractor:
         attn = attn / (attn.sum(axis=-1, keepdims=True) + 1e-10)
         return attn
 
+    def extract_all_layer_attentions(self, image: Image.Image) -> np.ndarray:
+        """Extract per-head CLS→patch attention from ALL transformer blocks.
+
+        Returns the raw attention weights from the [CLS] token to each spatial
+        patch token for every layer and head, re-normalized per head so each
+        row sums to 1.0. Register tokens are excluded.
+
+        Args:
+            image: PIL Image.
+
+        Returns:
+            3-D float32 array of shape ``(n_layers, n_heads, n_patches)`` where
+            ``n_layers == 12`` and ``n_heads == 12`` for ViT-B.
+        """
+        import torch
+
+        inputs = self.processor(images=image, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = self.model(**inputs, output_attentions=True)
+
+        # outputs.attentions: tuple of (1, n_heads, n_tokens, n_tokens) per layer
+        # CLS row (token 0), skip CLS + 4 register tokens → patch slice
+        layers = []
+        for layer_attn in outputs.attentions:
+            attn = layer_attn[0, :, 0, 5:].cpu().numpy().astype(np.float32)  # (n_heads, n_patches)
+            attn = attn / (attn.sum(axis=-1, keepdims=True) + 1e-10)
+            layers.append(attn)
+
+        return np.stack(layers, axis=0)  # (n_layers, n_heads, n_patches)
+
     def extract_batch(
         self,
         image_paths: list[Path] | list[str],
