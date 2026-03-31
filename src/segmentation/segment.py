@@ -226,33 +226,59 @@ class PatternSegmenter:
         entropy = -(attn_maps * np.log(attn_maps + eps)).sum(axis=-1)  # (n_heads,)
         return int(np.argmax(entropy))
 
+    def _select_best_layer_and_head(
+        self,
+        all_layer_attns: np.ndarray,
+    ) -> tuple[int, int]:
+        """Return (layer_idx, head_idx) of the pair with the highest spatial entropy.
+
+        Args:
+            all_layer_attns: float32, shape (n_layers, n_heads, n_patches),
+                each [layer, head] row sums to 1.
+
+        Returns:
+            (layer_idx, head_idx) — both indices within bounds.
+        """
+        eps = 1e-10
+        entropy = -(all_layer_attns * np.log(all_layer_attns + eps)).sum(axis=-1)  # (n_layers, n_heads)
+        flat_idx = int(np.argmax(entropy))
+        n_heads = all_layer_attns.shape[1]
+        return flat_idx // n_heads, flat_idx % n_heads
+
     def _compute_self_attention(
         self,
-        pil_img: Image,
+        pil_img: Image.Image,
         image_size: tuple[int, int],
-    ) -> tuple[np.ndarray, int]:
-        """Compute attention map from the max-entropy DINOv3 self-attention head.
+    ) -> tuple[np.ndarray, int, float]:
+        """Compute attention map from max-entropy DINOv3 self-attention head or layer.
 
-        Extracts per-head CLS→patch attention, selects the head with the
-        highest spatial entropy, then upsamples and smooths to native resolution
-        (same post-processing as ``_compute_attention``).
+        When ``attention_layer == "best"``, selects the ``(layer, head)`` pair
+        with the highest spatial entropy across all 12 layers and 12 heads.
+        When ``attention_layer == "last"``, uses the existing single-layer path.
 
         Args:
             pil_img: PIL Image at native resolution.
             image_size: (width, height) in PIL convention.
 
         Returns:
-            (attention_map, n_patches) where attention_map is float32 (H, W)
-            in [0, 1] and n_patches is read from the attention tensor shape.
+            (attention_map, n_patches, entropy) where attention_map is float32
+            (H, W) in [0, 1], n_patches is the patch count, and entropy is the
+            Shannon entropy of the selected head's patch-attention distribution.
         """
         from scipy.ndimage import gaussian_filter
 
-        attn_maps = self._get_extractor().extract_attention_maps(pil_img)
-        n_patches = attn_maps.shape[1]
+        if self._seg_config.attention_layer == "best":
+            all_attns = self._get_extractor().extract_all_layer_attentions(pil_img)
+            n_patches = all_attns.shape[2]
+            layer_idx, head_idx = self._select_best_layer_and_head(all_attns)
+            selected = all_attns[layer_idx, head_idx]   # (n_patches,)
+        else:  # "last"
+            attn_maps = self._get_extractor().extract_attention_maps(pil_img)
+            n_patches = attn_maps.shape[1]
+            best_head = self._select_attention_head(attn_maps)
+            selected = attn_maps[best_head]              # (n_patches,)
 
-        best_head = self._select_attention_head(attn_maps)
-        selected = attn_maps[best_head]  # (n_patches,)
-
+        # Shared post-processing
         grid_size = int(round(np.sqrt(n_patches)))
         width, height = image_size
 
@@ -268,7 +294,9 @@ class PatternSegmenter:
         attn_out = (
             (heat_smooth - smin) / (smax - smin) if smax > smin else heat_smooth
         )
-        return attn_out, n_patches
+
+        entropy = float(-(selected * np.log(selected + 1e-10)).sum())
+        return attn_out, n_patches, entropy
 
     # ------------------------------------------------------------------
     # Thresholding
@@ -521,6 +549,7 @@ class PatternSegmenter:
         image_size = pil_img.size          # (width, height) PIL convention
         image_np = np.asarray(pil_img)     # (H, W, 3) uint8 for SAM
 
+        entropy: float | None = None
         if self._seg_config.attention_mode == "classifier":
             class_idx = list(self._model.classes_).index(class_name)
             cls_coef = self._model.coef_[class_idx]  # (768,)
@@ -528,7 +557,7 @@ class PatternSegmenter:
             n_patches = patch_tokens.shape[0]
             attention_map = self._compute_attention(patch_tokens, cls_coef, image_size)
         else:  # "self_attention"
-            attention_map, n_patches = self._compute_self_attention(pil_img, image_size)
+            attention_map, n_patches, entropy = self._compute_self_attention(pil_img, image_size)
 
         binary_mask = self._threshold(attention_map)
         instance_masks, iou_scores = self._run_sam(image_np, attention_map, n_patches)
@@ -540,4 +569,5 @@ class PatternSegmenter:
             iou_scores=iou_scores,
             image_path=image_path,
             class_name=class_name,
+            attention_entropy=entropy,
         )

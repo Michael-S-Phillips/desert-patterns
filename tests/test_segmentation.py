@@ -438,7 +438,7 @@ def test_compute_self_attention_shape():
 
     from PIL import Image as PILImage
     dummy = PILImage.fromarray(np.zeros((56, 56, 3), dtype=np.uint8))
-    attn_out, n_patches_out = segmenter._compute_self_attention(dummy, (56, 56))
+    attn_out, n_patches_out, entropy = segmenter._compute_self_attention(dummy, (56, 56))
     assert attn_out.shape == (56, 56)
     assert n_patches_out == n_patches
 
@@ -456,7 +456,7 @@ def test_compute_self_attention_range():
 
     from PIL import Image as PILImage
     dummy = PILImage.fromarray(np.zeros((100, 120, 3), dtype=np.uint8))
-    attn_out, _ = segmenter._compute_self_attention(dummy, (120, 100))
+    attn_out, _, _entropy = segmenter._compute_self_attention(dummy, (120, 100))
     assert attn_out.min() >= 0.0
     assert attn_out.max() <= 1.0 + 1e-6
     assert attn_out.dtype == np.float32
@@ -474,8 +474,47 @@ def test_compute_self_attention_returns_n_patches():
 
     from PIL import Image as PILImage
     dummy = PILImage.fromarray(np.zeros((84, 84, 3), dtype=np.uint8))
-    _, returned_n = segmenter._compute_self_attention(dummy, (84, 84))
+    _, returned_n, _entropy = segmenter._compute_self_attention(dummy, (84, 84))
     assert returned_n == n_patches
+
+
+def test_select_best_layer_and_head_picks_max_entropy():
+    """_select_best_layer_and_head returns the (layer, head) with highest entropy."""
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+
+    seg = PatternSegmenter(None, SegmentationConfig(), None)
+    # Shape (3, 2, 16): layer 1, head 0 will be uniform (max entropy)
+    rng = np.random.default_rng(0)
+    all_attns = rng.dirichlet(np.ones(16) * 0.1, size=(3, 2)).astype(np.float32)
+    all_attns[1, 0] = np.full(16, 1.0 / 16, dtype=np.float32)
+    layer_idx, head_idx = seg._select_best_layer_and_head(all_attns)
+    assert layer_idx == 1
+    assert head_idx == 0
+    assert 0 <= layer_idx < 3
+    assert 0 <= head_idx < 2
+
+
+def test_compute_self_attention_best_layer():
+    """_compute_self_attention with attention_layer='best' returns (H, W) attn_map."""
+    pytest.importorskip("torch")
+    from PIL import Image as PILImage
+    from src.segmentation.segment import PatternSegmenter, SegmentationConfig
+    from src.features.dino_embeddings import DinoConfig
+
+    cfg = SegmentationConfig(attention_mode="self_attention", attention_layer="best")
+    seg = PatternSegmenter(None, cfg, DinoConfig())
+
+    n_layers, n_heads, n_patches = 2, 3, 16
+    fake_all_attns = np.ones((n_layers, n_heads, n_patches), dtype=np.float32) / n_patches
+    mock_extractor = MagicMock()
+    mock_extractor.extract_all_layer_attentions.return_value = fake_all_attns
+    seg._extractor = mock_extractor
+
+    img = PILImage.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+    attn_map, got_n_patches, entropy = seg._compute_self_attention(img, (64, 64))
+    assert attn_map.shape == (64, 64)
+    assert got_n_patches == n_patches
+    assert isinstance(entropy, float)
 
 
 # ---------------------------------------------------------------------------
